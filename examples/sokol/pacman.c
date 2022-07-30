@@ -122,7 +122,7 @@ static void app_frame(void) {
     const uint64_t emu_start_time = stm_now();
     state.ticks = namco_exec(&state.sys, state.frame_time_us);
     state.emu_time_ms = stm_ms(stm_since(emu_start_time));
-    draw_status_bar();
+    //draw_status_bar(); //this avoid to implement fonts and many features
     gfx_draw(namco_display_width(&state.sys), namco_display_height(&state.sys));
 }
 
