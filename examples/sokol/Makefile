@@ -10,8 +10,8 @@ INC += -I../roms
 INC += -I../../../sokol/tests/ext/
 INC += -I../../../fips-build/chips-test/linux-make-release/examples/common/
 
-CFLAGS += -O3
-LIBS = -ldl -lX11 -lXcursor -lXi -lGL -lpthread -lm -lasound
+CFLAGS += -O3 $(shell pkg-config sdl2 --cflags)
+LIBS = -ldl -lX11 -lXcursor -lXi -lGL -lpthread -lm -lasound $(shell pkg-config sdl2 --libs)
 LDFLAGS += $(LIBS)
 
 all: $(APP).bin
@@ -19,10 +19,10 @@ all: $(APP).bin
 $(APP).o: $(APP).c
 	gcc $(CFLAGS) $(INC) -c $(APP).c -o $(APP).o
 
-$(APP).bin: sokol_hal.c sokol_hal.c $(APP).o
+$(APP).bin: sokol_hal.c sokol_hal2.c sdl_fb.c $(APP).o
 	gcc  $(USE_SOKOL_DIRECT) $(CFLAGS) $(INC) -c sokol_hal.c -o sokol_hal.o
 	gcc  $(USE_SOKOL_DIRECT) $(CFLAGS) $(INC) -c sokol_hal2.c -o sokol_hal2.o
-	gcc sokol_hal.o sokol_hal2.o $(APP).o -o $(APP).bin $(LDFLAGS)
+	gcc $(CFLAGS) sdl_fb.c sokol_hal.o sokol_hal2.o $(APP).o -o $(APP).bin $(LDFLAGS)
 
 clean:
 	rm -f *.bin *.o
