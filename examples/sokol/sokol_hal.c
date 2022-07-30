@@ -551,6 +551,10 @@ SOKOL_API_IMPL int saudio_sample_rate(void) {
     return _saudio.sample_rate;
 }
 
+SOKOL_API_IMPL int saudio_channels(void) {
+    return _saudio.num_channels;
+}
+
 
 extern uint32_t rgba8_buffer[];
 
@@ -1007,12 +1011,14 @@ void _sapp_linux_run(const sapp_desc* desc) {
 
 fb_handle_t fb;
 uint32_t rgba8_buffer[GFX_MAX_FB_WIDTH * GFX_MAX_FB_HEIGHT];
+static uint32_t buffer2[GFX_MAX_FB_WIDTH * GFX_MAX_FB_HEIGHT];
 gfx_desc_t gfx_desc;
 
 void gfx_init(const gfx_desc_t* desc) {
 	gfx_desc = *desc;
     //printf("border_top %d, border_bottom %d, border_left %d, border_right %d, rot90 %d\n", desc->border_top, desc->border_bottom, desc->border_left, desc->border_right, desc->rot90);
-	fb_init(GFX_MAX_FB_WIDTH, GFX_MAX_FB_HEIGHT, true, &fb);
+    memset(buffer2, 0, sizeof(buffer2));
+	fb_init(_sapp.desc.width, _sapp.desc.height, true, &fb);
 	signal(SIGINT, SIG_DFL); //allows to exit by ctrl-c
 }
 
@@ -1035,21 +1041,21 @@ uint64_t stm_now(void);
 void gfx_draw(int emu_width, int emu_height) {
 	//static int frame = 0;
 	//printf("draw emu window %dx%d, time %d, frame/60 %d\n", emu_width, emu_height, stm_now()/1000000000, ++frame/60);
-	if(gfx_desc.rot90)
+	if(gfx_desc.rot90*0)
 	{
-		static uint32_t buffer2[GFX_MAX_FB_WIDTH * GFX_MAX_FB_HEIGHT];
-		const uint32_t *p = rgba8_buffer;
-		for(int x = emu_width-1; x >= 0; --x)
+		const uint32_t *p = rgba8_buffer+emu_height*emu_width;
+		for(int x = 0; x < emu_height; ++x)
 		{
-			for(int y = 0; y < emu_height; ++y)
-				buffer2[x+y*GFX_MAX_FB_WIDTH] = *p++;
+			p -= emu_width;
+			for(int y = 0; y < emu_width; ++y)
+				buffer2[x*3+y*3*GFX_MAX_FB_WIDTH] = p[y];
 		}
-		fb_update(&fb, buffer2, GFX_MAX_FB_WIDTH*+sizeof(buffer2[0]));
+		fb_update(&fb, buffer2, GFX_MAX_FB_WIDTH*sizeof(buffer2[0]));
 	}
 	else
 	{
 		//show something that may not be right
-		fb_update(&fb, rgba8_buffer, GFX_MAX_FB_WIDTH);
+		fb_update(&fb, rgba8_buffer, emu_width*sizeof(buffer2[0]));
 	}
 }
 
