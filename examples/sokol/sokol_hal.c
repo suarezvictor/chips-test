@@ -511,10 +511,11 @@ void _sapp_linux_run(const sapp_desc* desc) {
 
 fb_handle_t fb;
 uint32_t rgba8_buffer[GFX_MAX_FB_WIDTH * GFX_MAX_FB_HEIGHT];
+gfx_desc_t gfx_desc;
 
 void gfx_init(const gfx_desc_t* desc) {
-    //printf("border_top %d, border_bottom %d, border_left %d, border_right %d\n", desc->border_top, desc->border_bottom, desc->border_left, desc->border_right);
-
+	gfx_desc = *desc;
+    //printf("border_top %d, border_bottom %d, border_left %d, border_right %d, rot90 %d\n", desc->border_top, desc->border_bottom, desc->border_left, desc->border_right, desc->rot90);
 	fb_init(GFX_MAX_FB_WIDTH, GFX_MAX_FB_HEIGHT, true, &fb);
 	signal(SIGINT, SIG_DFL); //allows to exit by ctrl-c
 }
@@ -539,7 +540,23 @@ void gfx_draw(int emu_width, int emu_height) {
 	static int frame = 0;
 	//printf("draw emu window %dx%d, time %d, frame/60 %d\n", emu_width, emu_height, stm_now()/1000000000, ++frame/60);
 	//memset(rgba8_buffer, frame, sizeof(rgba8_buffer));
-	fb_update(&fb, rgba8_buffer, emu_width*sizeof(uint32_t));
+	if(gfx_desc.rot90)
+	{
+		//memset(rgba8_buffer+GFX_MAX_FB_WIDTH*100, 0xFF, GFX_MAX_FB_WIDTH*100);
+		static uint32_t buffer2[GFX_MAX_FB_WIDTH * GFX_MAX_FB_HEIGHT];
+		const uint32_t *p = rgba8_buffer;
+		for(int x = emu_width-1; x >= 0; --x)
+		{
+			for(int y = 0; y < emu_height; ++y)
+				buffer2[x+y*GFX_MAX_FB_WIDTH] = *p++;
+		}
+		fb_update(&fb, buffer2, GFX_MAX_FB_WIDTH*+sizeof(buffer2[0]));
+	}
+	else
+	{
+		//show something that may not be right
+		fb_update(&fb, rgba8_buffer, GFX_MAX_FB_WIDTH);
+	}
 }
 
 SOKOL_APP_API_DECL double sapp_frame_duration(void)
