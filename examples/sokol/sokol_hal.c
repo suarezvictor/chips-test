@@ -555,17 +555,17 @@ SOKOL_API_IMPL int saudio_sample_rate(void) {
 extern uint32_t rgba8_buffer[];
 
 SOKOL_API_IMPL int saudio_push(const float* frames, int num_frames) {
+  //simple synth
   /*
-  //noise synth
   for(int i = 0; i < num_frames; ++i)
   {
-    static int16_t sample = 0;
-    ((float*)frames)[i] = (float)sample/0x7FFF;
-    sample += 100;
+    static float wt = 0;
+    wt += 2*3.14*1000/44100;
+    ((float*)frames)[i] += .25*sin(wt); //adds a signal	
   }
-  //memcpy(rgba8_buffer+0x1000, frames,  num_frames*sizeof(*frames)); //hacky screen dump. CAUTION: may overwrite memory
   */
-
+  
+  //memcpy(rgba8_buffer+0x1000, frames,  num_frames*sizeof(*frames)); //hacky screen dump. CAUTION: may overwrite memory
   printf("pushing %d samples some sample=%f\n", num_frames, frames[num_frames/2]);
 
     SOKOL_ASSERT(frames && (num_frames > 0));
