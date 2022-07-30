@@ -11,7 +11,7 @@ bool fb_init(unsigned width, unsigned height, bool vsync, fb_handle_t *handle)
     if(SDL_Init(SDL_INIT_VIDEO) < 0)
      return false;
 
-    handle->win = SDL_CreateWindow("CFlexHDL Simulator", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, width, height, SDL_WINDOW_SHOWN);
+    handle->win = SDL_CreateWindow("Framebuffer", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, width, height, SDL_WINDOW_SHOWN);
     if (!handle->win)
       return false;
 
