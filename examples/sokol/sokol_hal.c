@@ -240,6 +240,10 @@ int _saudio_ring_idx(_saudio_ring_t* ring, int i) {
     return (i % ring->num);
 }
 
+bool _saudio_ring_empty(_saudio_ring_t* ring) {
+    return ring->head == ring->tail;
+}
+
 void _saudio_ring_enqueue(_saudio_ring_t* ring, int val) {
     SOKOL_ASSERT(!_saudio_ring_full(ring));
     ring->queue[ring->head] = val;
@@ -319,6 +323,56 @@ int _saudio_fifo_read(_saudio_fifo_t* fifo, uint8_t* ptr, int num_bytes) {
     return num_bytes_copied;
 }
 
+
+/* write new data to the write queue, this is called from main thread */
+int _saudio_fifo_write(_saudio_fifo_t* fifo, const uint8_t* ptr, int num_bytes) {
+    /* returns the number of bytes written, this will be smaller then requested
+        if the write queue runs full
+    */
+    int all_to_copy = num_bytes;
+    while (all_to_copy > 0) {
+        /* need to grab a new packet? */
+        if (fifo->cur_packet == -1) {
+            _saudio_mutex_lock(&fifo->mutex);
+            if (!_saudio_ring_empty(&fifo->write_queue)) {
+                fifo->cur_packet = _saudio_ring_dequeue(&fifo->write_queue);
+            }
+            _saudio_mutex_unlock(&fifo->mutex);
+            SOKOL_ASSERT(fifo->cur_offset == 0);
+        }
+        /* append data to current write packet */
+        if (fifo->cur_packet != -1) {
+            int to_copy = all_to_copy;
+            const int max_copy = fifo->packet_size - fifo->cur_offset;
+            if (to_copy > max_copy) {
+                to_copy = max_copy;
+            }
+            uint8_t* dst = fifo->base_ptr + fifo->cur_packet * fifo->packet_size + fifo->cur_offset;
+            memcpy(dst, ptr, (size_t)to_copy);
+            ptr += to_copy;
+            fifo->cur_offset += to_copy;
+            all_to_copy -= to_copy;
+            SOKOL_ASSERT(fifo->cur_offset <= fifo->packet_size);
+            SOKOL_ASSERT(all_to_copy >= 0);
+        }
+        else {
+            /* early out if we're starving */
+            int bytes_copied = num_bytes - all_to_copy;
+            SOKOL_ASSERT((bytes_copied >= 0) && (bytes_copied < num_bytes));
+            return bytes_copied;
+        }
+        /* if write packet is full, push to read queue */
+        if (fifo->cur_offset == fifo->packet_size) {
+            _saudio_mutex_lock(&fifo->mutex);
+            _saudio_ring_enqueue(&fifo->read_queue, fifo->cur_packet);
+            _saudio_mutex_unlock(&fifo->mutex);
+            fifo->cur_packet = -1;
+            fifo->cur_offset = 0;
+        }
+    }
+    SOKOL_ASSERT(all_to_copy == 0);
+    return num_bytes;
+}
 void _saudio_fifo_shutdown(_saudio_fifo_t* fifo) {
     SOKOL_ASSERT(fifo->base_ptr);
     _saudio_free(fifo->base_ptr);
@@ -493,6 +547,7 @@ SOKOL_API_IMPL void saudio_shutdown(void) {
 }
 
 SOKOL_API_IMPL int saudio_sample_rate(void) {
+    printf("sample rate %d\n", _saudio.sample_rate);
     return _saudio.sample_rate;
 }
 
@@ -500,9 +555,28 @@ SOKOL_API_IMPL int saudio_sample_rate(void) {
 extern uint32_t rgba8_buffer[];
 
 SOKOL_API_IMPL int saudio_push(const float* frames, int num_frames) {
-  memcpy(rgba8_buffer+0x1000, frames,  num_frames*sizeof(*frames));
-  printf("pushed %d samples some sample=%f\n", num_frames, frames[num_frames/2]); 
-  return num_frames;
+  /*
+  //noise synth
+  for(int i = 0; i < num_frames; ++i)
+  {
+    static int16_t sample = 0;
+    ((float*)frames)[i] = (float)sample/0x7FFF;
+    sample += 100;
+  }
+  //memcpy(rgba8_buffer+0x1000, frames,  num_frames*sizeof(*frames)); //hacky screen dump. CAUTION: may overwrite memory
+  */
+
+  printf("pushing %d samples some sample=%f\n", num_frames, frames[num_frames/2]);
+
+    SOKOL_ASSERT(frames && (num_frames > 0));
+    if (_saudio.valid) {
+        const int num_bytes = num_frames * _saudio.bytes_per_frame;
+        const int num_written = _saudio_fifo_write(&_saudio.fifo, (const uint8_t*)frames, num_bytes);
+        return num_written / _saudio.bytes_per_frame;
+    }
+    else {
+        return 0;
+    }
 }
 
 
