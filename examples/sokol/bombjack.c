@@ -126,7 +126,7 @@ static void app_frame(void) {
     const uint64_t emu_start_time = stm_now();
     state.ticks = bombjack_exec(&state.sys, state.frame_time_us);
     state.emu_time_ms = stm_ms(stm_since(emu_start_time));
-    draw_status_bar();
+    //draw_status_bar();
     gfx_draw(bombjack_display_width(&state.sys), bombjack_display_height(&state.sys));
 }
 
