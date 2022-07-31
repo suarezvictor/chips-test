@@ -101,7 +101,7 @@ SOKOL_API_IMPL float sapp_heightf(void) {
 
 #define _SAUDIO_DEFAULT_SAMPLE_RATE (44100)
 #define _SAUDIO_DEFAULT_BUFFER_FRAMES (2048)
-#define _SAUDIO_DEFAULT_PACKET_FRAMES (128)
+#define _SAUDIO_DEFAULT_PACKET_FRAMES (128) //make sure is power of two
 #define _SAUDIO_DEFAULT_NUM_PACKETS ((_SAUDIO_DEFAULT_BUFFER_FRAMES/_SAUDIO_DEFAULT_PACKET_FRAMES)*4)
 
 
@@ -115,11 +115,13 @@ void _saudio_clear(void* ptr, size_t size) {
 
 typedef struct {
     SDL_AudioDeviceID device;
+/*
     float* buffer;
     int buffer_byte_size;
     int buffer_frames;
     pthread_t thread;
     bool thread_stop;
+*/
 } _saudio_backend_t;
 
 
@@ -156,7 +158,7 @@ bool _saudio_backend_init(void) {
 	static SDL_AudioSpec specs = {0}, obtanined;
 	specs.freq = samplerate;
 	specs.channels = num_channels;
-	specs.samples = num_samples *sizeof(float);
+	specs.samples = num_samples*sizeof(float); //should be power of two. FIXME: fix if different and reflect in _saudio
 	specs.userdata = 0;
 	specs.callback = NULL; //no callback
 	specs.format = AUDIO_F32SYS; //float32
@@ -173,7 +175,7 @@ bool _saudio_backend_init(void) {
 };
 
 void _saudio_backend_shutdown(void) {
-#warning implement this
+  SDL_CloseAudioDevice(_saudio.backend.device);
 };
 
 SOKOL_API_IMPL void saudio_setup(const saudio_desc* desc) {
@@ -221,9 +223,6 @@ SOKOL_API_IMPL int saudio_channels(void) {
     return _saudio.num_channels;
 }
 
-
-extern uint32_t rgba8_buffer[];
-
 //num_frames are doubled the samples if stereo
 SOKOL_API_IMPL int saudio_push(const float* frames, int num_frames) {
   //simple synth
@@ -235,8 +234,6 @@ SOKOL_API_IMPL int saudio_push(const float* frames, int num_frames) {
     ((float*)frames)[i] += .25*sin(wt); //adds a signal	
   }*/
   
-  
-  //memcpy(rgba8_buffer+0x1000, frames,  num_frames*sizeof(*frames)); //hacky screen dump. CAUTION: may overwrite memory
   //if(frames[num_frames/2] != 0)
     //printf("pushing %d samples half buffer sample=%f, bytes_per_frame %d\n", num_frames, frames[num_frames/2], _saudio.bytes_per_frame);
 
@@ -259,6 +256,7 @@ SOKOL_AUDIO_API_DECL int saudio_expect(void)
   return frames; //always fixed packet size expected
 }
 
+
 ////////////////////////////////
 //from sokol_time.h
 #include <time.h>
@@ -272,39 +270,17 @@ static _stm_state_t _stm;
 SOKOL_API_IMPL void stm_setup(void) {
     memset(&_stm, 0, sizeof(_stm));
     _stm.initialized = 0xABCDABCD;
-    #if defined(_WIN32)
-        QueryPerformanceFrequency(&_stm.freq);
-        QueryPerformanceCounter(&_stm.start);
-    #elif defined(__APPLE__) && defined(__MACH__)
-        mach_timebase_info(&_stm.timebase);
-        _stm.start = mach_absolute_time();
-    #elif defined(__EMSCRIPTEN__)
-        _stm.start = emscripten_get_now();
-    #else
         struct timespec ts;
         clock_gettime(CLOCK_MONOTONIC, &ts);
         _stm.start = (uint64_t)ts.tv_sec*1000000000 + (uint64_t)ts.tv_nsec;
-    #endif
 }
 
 SOKOL_API_IMPL uint64_t stm_now(void) {
     SOKOL_ASSERT(_stm.initialized == 0xABCDABCD);
     uint64_t now;
-    #if defined(_WIN32)
-        LARGE_INTEGER qpc_t;
-        QueryPerformanceCounter(&qpc_t);
-        now = (uint64_t) _stm_int64_muldiv(qpc_t.QuadPart - _stm.start.QuadPart, 1000000000, _stm.freq.QuadPart);
-    #elif defined(__APPLE__) && defined(__MACH__)
-        const uint64_t mach_now = mach_absolute_time() - _stm.start;
-        now = (uint64_t) _stm_int64_muldiv((int64_t)mach_now, (int64_t)_stm.timebase.numer, (int64_t)_stm.timebase.denom);
-    #elif defined(__EMSCRIPTEN__)
-        double js_now = emscripten_get_now() - _stm.start;
-        now = (uint64_t) (js_now * 1000000.0);
-    #else
         struct timespec ts;
         clock_gettime(CLOCK_MONOTONIC, &ts);
         now = ((uint64_t)ts.tv_sec*1000000000 + (uint64_t)ts.tv_nsec) - _stm.start;
-    #endif
     return now;
 }
 
@@ -320,7 +296,6 @@ SOKOL_API_IMPL uint64_t stm_diff(uint64_t new_ticks, uint64_t old_ticks) {
 SOKOL_API_IMPL uint64_t stm_since(uint64_t start_ticks) {
     return stm_diff(stm_now(), start_ticks);
 }
-
 
 SOKOL_API_IMPL double stm_sec(uint64_t ticks) {
     return (double)ticks / 1000000000.0;
@@ -344,27 +319,7 @@ SOKOL_API_IMPL double stm_ns(uint64_t ticks) {
 //OS-specific
 #define _sapp_def(val, def) (((val) == 0) ? (def) : (val))
 
-#define _SAPP_RING_NUM_SLOTS (256)
 typedef struct {
-    int head;
-    int tail;
-    double buf[_SAPP_RING_NUM_SLOTS];
-} _sapp_ring_t;
-
-typedef struct {
-    #if defined(_SAPP_APPLE)
-        struct {
-            mach_timebase_info_data_t timebase;
-            uint64_t start;
-        } mach;
-    #elif defined(_SAPP_EMSCRIPTEN)
-        // empty
-    #elif defined(_SAPP_WIN32) || defined(_SAPP_UWP)
-        struct {
-            LARGE_INTEGER freq;
-            LARGE_INTEGER start;
-        } win;
-    #else // Linux, Android, ...
         #ifdef CLOCK_MONOTONIC
         #define _SAPP_CLOCK_MONOTONIC CLOCK_MONOTONIC
         #else
@@ -374,7 +329,6 @@ typedef struct {
         struct {
             uint64_t start;
         } posix;
-    #endif
 } _sapp_timestamp_t;
 
 typedef struct {
@@ -384,7 +338,6 @@ typedef struct {
     int spike_count;
     int num;
     _sapp_timestamp_t timestamp;
-    _sapp_ring_t ring;
 } _sapp_timing_t;
 
 typedef struct {
@@ -415,7 +368,6 @@ typedef struct {
     _sapp_clipboard_t clipboard;
     _sapp_drop_t drop;
     sapp_icon_desc default_icon_desc;
-    */
     uint32_t* default_icon_pixels;
     #if defined(_SAPP_MACOS)
         _sapp_macos_t macos;
@@ -441,7 +393,6 @@ typedef struct {
         _sapp_x11_t x11;
         _sapp_glx_t glx;
     #endif
-    /*
     char html5_canvas_selector[_SAPP_MAX_TITLE_LENGTH];
     char window_title[_SAPP_MAX_TITLE_LENGTH];      // UTF-8
     wchar_t window_title_wide[_SAPP_MAX_TITLE_LENGTH];   // UTF-32 or UCS-2
@@ -481,34 +432,17 @@ void _sapp_frame(void) {
     _sapp.frame_count++;
 }
 
-void _sapp_ring_init(_sapp_ring_t* ring) {
-    ring->head = 0;
-    ring->tail = 0;
-}
-
 void _sapp_timing_reset(_sapp_timing_t* t) {
     t->last = 0.0;
     t->accum = 0.0;
     t->spike_count = 0;
     t->num = 0;
-    _sapp_ring_init(&t->ring);
 }
 
-
 void _sapp_timestamp_init(_sapp_timestamp_t* ts) {
-    #if defined(_SAPP_APPLE)
-        mach_timebase_info(&ts->mach.timebase);
-        ts->mach.start = mach_absolute_time();
-    #elif defined(_SAPP_EMSCRIPTEN)
-        (void)ts;
-    #elif defined(_SAPP_WIN32) || defined(_SAPP_UWP)
-        QueryPerformanceFrequency(&ts->win.freq);
-        QueryPerformanceCounter(&ts->win.start);
-    #else
         struct timespec tspec;
         clock_gettime(_SAPP_CLOCK_MONOTONIC, &tspec);
         ts->posix.start = (uint64_t)tspec.tv_sec*1000000000 + (uint64_t)tspec.tv_nsec;
-    #endif
 }
 
 void _sapp_timing_init(_sapp_timing_t* t) {
@@ -521,7 +455,6 @@ void _sapp_clear(void* ptr, size_t size) {
     SOKOL_ASSERT(ptr && (size > 0));
     memset(ptr, 0, size);
 }
-
 
 sapp_desc _sapp_desc_defaults(const sapp_desc* desc) {
     SOKOL_ASSERT((desc->allocator.alloc && desc->allocator.free) || (!desc->allocator.alloc && !desc->allocator.free));
@@ -546,16 +479,7 @@ sapp_desc _sapp_desc_defaults(const sapp_desc* desc) {
     return res;
 }
 
-#if defined(_SAPP_MACOS) || defined(_SAPP_IOS)
-    // this is ARC compatible
-    #if defined(__cplusplus)
-        #define _SAPP_CLEAR_ARC_STRUCT(type, item) { item = type(); }
-    #else
-        #define _SAPP_CLEAR_ARC_STRUCT(type, item) { item = (type) { 0 }; }
-    #endif
-#else
-    #define _SAPP_CLEAR_ARC_STRUCT(type, item) { _sapp_clear(&item, sizeof(item)); }
-#endif
+#define _SAPP_CLEAR_ARC_STRUCT(type, item) { _sapp_clear(&item, sizeof(item)); }
 
 void _sapp_init_state(const sapp_desc* desc) {
     SOKOL_ASSERT(desc);
@@ -604,10 +528,11 @@ void _sapp_init_state(const sapp_desc* desc) {
 
 #include "gfx.h" //just prototypes and defines (since no COMMON_IMPL defined)
 
-fb_handle_t fb;
-uint32_t rgba8_buffer[GFX_MAX_FB_WIDTH * GFX_MAX_FB_HEIGHT];
+//FIXME: move this to the correct struct
+static fb_handle_t fb;
+static uint32_t rgba8_buffer[GFX_MAX_FB_WIDTH * GFX_MAX_FB_HEIGHT];
 static uint32_t rotated_buffer[GFX_MAX_FB_WIDTH*GFX_MAX_FB_HEIGHT];
-gfx_desc_t gfx_desc;
+static gfx_desc_t gfx_desc;
 
 void gfx_init(const gfx_desc_t* desc) {
 	gfx_desc = *desc;
@@ -616,8 +541,6 @@ void gfx_init(const gfx_desc_t* desc) {
 	fb_init(_sapp.desc.width, _sapp.desc.height, true, &fb);
 	signal(SIGINT, SIG_DFL); //allows to exit by ctrl-c
 }
-
-//bool fb_should_quit(void);  
 
 void gfx_shutdown() {
 	fb_deinit(&fb);
@@ -630,8 +553,6 @@ uint32_t* gfx_framebuffer(void) {
 size_t gfx_framebuffer_size(void) {
     return sizeof(rgba8_buffer);
 }
-
-uint64_t stm_now(void);
 
 void gfx_draw(int emu_width, int emu_height) {
 	//static int frame = 0;
@@ -675,7 +596,7 @@ void gfx_draw(int emu_width, int emu_height) {
 
 SOKOL_APP_API_DECL double sapp_frame_duration(void)
 {
- //measure and return averaged time
+ //FIXME: measure and return averaged time
  return 1./60;
 }
 
@@ -728,16 +649,10 @@ int sdl2keymap(int k)
   }
   return 0;
 }
-void _sapp_linux_run(const sapp_desc* desc) {
-    /* The following lines are here to trigger a linker error instead of an
-        obscure runtime error if the user has forgotten to add -pthread to
-        the compiler or linker options. They have no other purpose.
-    pthread_attr_t pthread_attr;
-    pthread_attr_init(&pthread_attr);
-    pthread_attr_destroy(&pthread_attr);
-    */
 
+void _sapp_linux_run(const sapp_desc* desc) {
     _sapp_init_state(desc);
+
     /*
     _sapp.x11.window_state = NormalState;
 
@@ -791,12 +706,6 @@ void _sapp_linux_run(const sapp_desc* desc) {
             }
         }
     }
-    _sapp_call_cleanup();
-    _sapp_glx_destroy_context();
-    _sapp_x11_destroy_window();
-    _sapp_x11_destroy_cursors();
-    XCloseDisplay(_sapp.x11.display);
-    _sapp_discard_state();
     */
     for(;;)
     {
@@ -825,7 +734,15 @@ void _sapp_linux_run(const sapp_desc* desc) {
       //_sapp_glx_swap_buffers()
       //printf("frame %d\n", _sapp.frame_count);
     }
-
+/*
+    _sapp_call_cleanup();
+    _sapp_glx_destroy_context();
+    _sapp_x11_destroy_window();
+    _sapp_x11_destroy_cursors();
+    XCloseDisplay(_sapp.x11.display);
+    _sapp_discard_state();
+*/
+	fb_deinit(&fb);
 }
 
 
