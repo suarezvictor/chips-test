@@ -22,7 +22,7 @@ FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
 AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.    
+SOFTWARE.
 */
 
 #ifdef __linux__
@@ -38,17 +38,17 @@ SOFTWARE.
 #include <litex.h> //FAST_CODE and FAST_DATA macros
 #include "lite_fb.h"
 #include "litesdk_timer.h"
+#define NAMCO_USE_BGRA8 //invers palette
 #endif
 
 #define FB_WIDTH_MAX 1024 //next power of 2
 #define PIXEL_SCALING 2
 #define ROTATED_90
 #define DEFAULT_SAMPLERATE 44100
-
+#define NAMCO_AUDIO_FLOAT
 /////////////////////////
 //simulator declarations
 
-#define NAMCO_USE_BGRA8 //invers palette
 #define NAMCO_PACMAN
 //#define NAMCO_PENGO
 
@@ -63,7 +63,7 @@ SOFTWARE.
 #include "pengo-roms.h"
 #endif
 
-#include "systems/namco.h"
+#include "namco-optimized.h"
 
 
 /////////////////////////
@@ -169,24 +169,60 @@ bool run_sim(void)
   return sim_exec(t);
 }
 
+static SDL_AudioDeviceID audio_device;
+void audio_init(int samplerate, int num_samples)
+{
+	static SDL_AudioSpec specs = {0}, obtanined;
+	specs.freq = samplerate;
+	specs.channels = 1;
+	specs.samples = num_samples;
+	specs.userdata = 0;
+	specs.callback = NULL; //no callback
+#ifdef NAMCO_AUDIO_FLOAT 
+	specs.format = AUDIO_F32SYS;
+#else
+#error only float sample supported
+#endif
+
+	SDL_InitSubSystem(SDL_INIT_AUDIO);
+	audio_device = SDL_OpenAudioDevice(NULL, 0, &specs, &obtanined, SDL_AUDIO_ALLOW_CHANNELS_CHANGE|SDL_AUDIO_ALLOW_FREQUENCY_CHANGE);
+	if (audio_device)
+	{
+			SDL_PauseAudioDevice(audio_device, 0); //start playing
+		    //printf("Audio ok, samplerate %d, num_samples %d\n", samplerate, num_samples);
+	}
+}
+
+void audio_pushf(const float* samples, int num_samples)
+{
+    float value = samples[num_samples/2];
+    //if(value)
+    //  printf("Received float audio frame: %d samples, value at half buffer %f\n", num_samples, value);
+	SDL_QueueAudio(audio_device, samples, num_samples*sizeof(*samples));
+}
+
 #ifdef NAMCO_AUDIO_FLOAT 
 static void push_audio(const float* samples, int num_samples, void* user_data) {
     (void)user_data;
-    //saudio_push(samples, num_samples);
+    audio_pushf(samples, num_samples);
 }
 #else
 static void push_audio(const int32_t* samples, int num_samples, void* user_data) {
     (void)user_data;
+    int32_t value = samples[num_samples/2];
+    //if(value)
+    //  printf("Received float audio frame: %d samples, mid value %d\n", num_samples, value);
     static float samples_f[NAMCO_MAX_AUDIO_SAMPLES];
     for(int i = 0; i < num_samples; ++i)
-    	samples_f[i] = (float)samples[i]/NAMCO_AUDIO_SAMPLE_SCALING;
-    //saudio_push(samples_f, num_samples);
+    	samples_f[i] = (float)samples[i]/NAMCO_AUDIO_SAMPLE_SCALING+0.5;
+    audio_pushf(samples_f, num_samples);
 }
 #endif
 
 int main(int argc, char* argv[])
 {
 	fb_init(FB_WIDTH, FB_HEIGHT, true, &fb);
+	audio_init(DEFAULT_SAMPLERATE, NAMCO_DEFAULT_AUDIO_SAMPLES);
 	signal(SIGINT, SIG_DFL); //allows to exit by ctrl-c
 	sim_init(pixel_buffer,  sizeof(pixel_buffer), push_audio, DEFAULT_SAMPLERATE);
     while(run_sim());
