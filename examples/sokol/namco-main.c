@@ -212,7 +212,6 @@ static void push_audio(const int32_t* samples, int num_samples, void* user_data)
 #endif
     audio_pushbuf(samples_conv, num_samples*sizeof(*samples));
 }
-#endif
 
 int main(int argc, char* argv[])
 {

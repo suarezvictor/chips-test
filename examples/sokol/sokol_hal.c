@@ -252,22 +252,8 @@ SOKOL_API_IMPL int saudio_push(const float* frames, int num_frames) {
 //returns how much is in the buffer
 SOKOL_AUDIO_API_DECL int saudio_expect(void)
 {
-/*
-//push algorithm
-        const int num_frames = saudio_expect();
-        if (num_frames > 0) {
-            const int num_samples = num_frames * saudio_channels();
-            read_samples(state, state->flt_buf, num_samples);
-            saudio_push(state->flt_buf, num_frames);
-        }
-*/
-
   int queued = SDL_GetQueuedAudioSize(_saudio.backend.device)/_saudio.bytes_per_frame;
   int frames = _saudio.packet_frames;
-  if(queued)
-  {
-    //printf("fames %d, queued %d\n", frames, queued);
-  }
   if(queued >= _saudio.buffer_frames)
     return 0;
   return frames; //always fixed packet size expected
