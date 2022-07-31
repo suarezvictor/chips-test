@@ -34,9 +34,9 @@ run: all
 	./$(APP).bin
 	
 
-main: $(APP)main.bin
-	./$(APP)main.bin
+main: namco-main.bin
+	./namco-main.bin
 	
-$(APP)main.bin: $(APP)-main.c
-	gcc $(CFLAGS) $(INC) $(APP)-main.c sdl_fb.c -o $(APP)main.bin $(LDFLAGS)
+namco-main.bin: namco-main.c
+	gcc $(CFLAGS) $(INC) namco-main.c sdl_fb.c -o namco-main.bin $(LDFLAGS)
 
