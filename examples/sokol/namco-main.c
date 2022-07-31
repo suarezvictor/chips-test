@@ -24,13 +24,22 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.    
 */
+
+#ifdef __linux__
 #include <stdint.h>
 #include <stdbool.h>
 #include <stdio.h>
+#define FB_WIDTH 800
+#define FB_HEIGHT 600
+#define FAST_CODE
+#define FAST_DATA
+#else
+#include <stddef.h> //for NULL (FIXME: used in litesdk_timer.h)
+#include <litex.h> //FAST_CODE and FAST_DATA macros
+#include "lite_fb.h"
+#include "litesdk_timer.h"
+#endif
 
-
-#define FRAME_WIDTH 800
-#define FRAME_HEIGHT 600
 #define FB_WIDTH_MAX 1024 //next power of 2
 #define PIXEL_SCALING 2
 #define ROTATED_90
@@ -39,8 +48,9 @@ SOFTWARE.
 /////////////////////////
 //simulator declarations
 
-//#define NAMCO_PACMAN
-#define NAMCO_PENGO
+#define NAMCO_USE_BGRA8 //invers palette
+#define NAMCO_PACMAN
+//#define NAMCO_PENGO
 
 #define CHIPS_IMPL
 #include "chips/z80.h"
@@ -92,17 +102,17 @@ void sim_setkey(enum KEYCODE key, bool value);
 #include "sdl_fb.h"
 
 
-static uint32_t pixel_buffer[FB_WIDTH_MAX*FRAME_HEIGHT];
+static uint32_t pixel_buffer[FB_WIDTH_MAX*FB_HEIGHT];
 static fb_handle_t fb;
 
 void draw_frame(int emu_width, int emu_height)
 {
 #ifdef ROTATED_90
-	static uint32_t rotated_buffer[FB_WIDTH_MAX*FRAME_HEIGHT];
+	static uint32_t rotated_buffer[FB_WIDTH_MAX*FB_HEIGHT];
 	const uint32_t *src = pixel_buffer+emu_height*emu_width;
 	uint32_t *dst = rotated_buffer;
-	dst += (FRAME_WIDTH-emu_height*PIXEL_SCALING)/2; //center X
-	dst += FB_WIDTH_MAX*(FRAME_HEIGHT-emu_width*PIXEL_SCALING)/2; //center Y
+	dst += (FB_WIDTH-emu_height*PIXEL_SCALING)/2; //center X
+	dst += FB_WIDTH_MAX*(FB_HEIGHT-emu_width*PIXEL_SCALING)/2; //center Y
 	src -= emu_width;
 	for(int x = 0; x < emu_height; ++x)
 	{
@@ -176,20 +186,76 @@ static void push_audio(const int32_t* samples, int num_samples, void* user_data)
 
 int main(int argc, char* argv[])
 {
-	fb_init(FRAME_WIDTH, FRAME_HEIGHT, true, &fb);
+	fb_init(FB_WIDTH, FB_HEIGHT, true, &fb);
 	signal(SIGINT, SIG_DFL); //allows to exit by ctrl-c
 	sim_init(pixel_buffer,  sizeof(pixel_buffer), push_audio, DEFAULT_SAMPLERATE);
     while(run_sim());
     return 0;
 }
 
+#else
+
+
+static uint32_t pixel_buffer[NAMCO_DISPLAY_WIDTH*NAMCO_DISPLAY_HEIGHT];
+
+void FAST_CODE draw_frame(int emu_width, int emu_height)
+{
+#ifdef ROTATED_90
+	const uint32_t *src = pixel_buffer+NAMCO_DISPLAY_HEIGHT*NAMCO_DISPLAY_WIDTH;
+	uint32_t *dst = (uint32_t*) FB_PAGE1;
+	dst += FB_WIDTH/2-emu_height*PIXEL_SCALING/2; //center X
+	dst += FB_WIDTH*(FB_HEIGHT/2-NAMCO_DISPLAY_WIDTH*PIXEL_SCALING/2); //center Y
+	src -= NAMCO_DISPLAY_WIDTH;
+	for(int x = 0; x < NAMCO_DISPLAY_HEIGHT; ++x)
+	{
+		for(int y = 0; y < NAMCO_DISPLAY_WIDTH; ++y)
+		{
+			*dst = *src;
+			src += 1;
+			dst += PIXEL_SCALING*FB_WIDTH;
+		}
+		src -= 2*NAMCO_DISPLAY_WIDTH;
+		dst += PIXEL_SCALING - NAMCO_DISPLAY_WIDTH*PIXEL_SCALING*FB_WIDTH;
+	}
+#else
+	#error no rotation
+#endif
+}
+static inline uint64_t cpu_hal_get_cycle_count64(void) { timer0_uptime_latch_write(1); return timer0_uptime_cycles_read(); }
+#define micros() ((1000000ull*cpu_hal_get_cycle_count64())/LITETIMER_BASE_FREQUENCY)
+
+bool run_sim(void)
+{
+  draw_frame(sim_width(), sim_height());
+  uint64_t t = micros();
+  printf("current time %llu\n", t);
+  return sim_exec(t);
+}
+
+#ifdef NAMCO_AUDIO_FLOAT
+#error floating point valued samples not supported
+#else
+static void push_audio(const int32_t* samples, int num_samples, void* user_data) {
+    (void)user_data;
+    //saudio_push(samples_f, num_samples);
+}
+#endif
+
+void emu_main(void)
+{
+	fb_clear();
+	sim_init(pixel_buffer, sizeof(pixel_buffer), push_audio, DEFAULT_SAMPLERATE);
+    while(run_sim());
+}
+
 
 #endif
+
 
 /////////////////////
 //generic simulator
 
-static namco_t sys;
+static /*FAST_DATA*/ namco_t sys;
 void sim_init(uint32_t *framebuffer, size_t fb_size, audio_cb_t audio_cb, int samplerate)
 {
     namco_init(&sys, &(namco_desc_t){
@@ -250,6 +316,8 @@ bool sim_exec(uint64_t t1)
 	
     int64_t us = (int64_t)(t1-t0);
     t0 = t1;
+    if(us > 1000000/60)
+      us = 1000000/60;
     namco_exec(&sys, us);
     return true;
 }
