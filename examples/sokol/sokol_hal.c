@@ -49,6 +49,7 @@ stm_since, stm_ms
 #include <signal.h>
 #include <pthread.h>
 #include "sdl_fb.h"
+#include <SDL2/SDL.h> //for events
 
 #include "sokol_app.h" //no implementation requested
 
@@ -547,7 +548,7 @@ SOKOL_API_IMPL void saudio_shutdown(void) {
 }
 
 SOKOL_API_IMPL int saudio_sample_rate(void) {
-    printf("sample rate %d\n", _saudio.sample_rate);
+    //printf("sample rate %d\n", _saudio.sample_rate);
     return _saudio.sample_rate;
 }
 
@@ -570,7 +571,7 @@ SOKOL_API_IMPL int saudio_push(const float* frames, int num_frames) {
   */
   
   //memcpy(rgba8_buffer+0x1000, frames,  num_frames*sizeof(*frames)); //hacky screen dump. CAUTION: may overwrite memory
-  printf("pushing %d samples some sample=%f\n", num_frames, frames[num_frames/2]);
+  //printf("pushing %d samples some sample=%f\n", num_frames, frames[num_frames/2]);
 
     SOKOL_ASSERT(frames && (num_frames > 0));
     if (_saudio.valid) {
@@ -735,8 +736,8 @@ typedef struct {
     float dpi_scale;
     uint64_t frame_count;
     _sapp_timing_t timing;
-    /*
     sapp_event event;
+    /*
     _sapp_mouse_t mouse;
     _sapp_clipboard_t clipboard;
     _sapp_drop_t drop;
@@ -928,6 +929,113 @@ void _sapp_init_state(const sapp_desc* desc) {
     _sapp_timing_init(&_sapp.timing);
 }
 
+#include "gfx.h" //just prototypes and defines (since no COMMON_IMPL defined)
+
+fb_handle_t fb;
+uint32_t rgba8_buffer[GFX_MAX_FB_WIDTH * GFX_MAX_FB_HEIGHT];
+static uint32_t buffer2[GFX_MAX_FB_WIDTH * GFX_MAX_FB_HEIGHT];
+gfx_desc_t gfx_desc;
+
+void gfx_init(const gfx_desc_t* desc) {
+	gfx_desc = *desc;
+    //printf("border_top %d, border_bottom %d, border_left %d, border_right %d, rot90 %d\n", desc->border_top, desc->border_bottom, desc->border_left, desc->border_right, desc->rot90);
+    memset(buffer2, 0, sizeof(buffer2));
+	fb_init(_sapp.desc.width, _sapp.desc.height, true, &fb);
+	signal(SIGINT, SIG_DFL); //allows to exit by ctrl-c
+}
+
+//bool fb_should_quit(void);  
+
+void gfx_shutdown() {
+	fb_deinit(&fb);
+}
+
+uint32_t* gfx_framebuffer(void) {
+    return rgba8_buffer;
+}
+
+size_t gfx_framebuffer_size(void) {
+    return sizeof(rgba8_buffer);
+}
+
+uint64_t stm_now(void);
+
+void gfx_draw(int emu_width, int emu_height) {
+	//static int frame = 0;
+	//printf("draw emu window %dx%d, time %d, frame/60 %d\n", emu_width, emu_height, stm_now()/1000000000, ++frame/60);
+	if(gfx_desc.rot90)
+	{
+		const uint32_t *p = rgba8_buffer+emu_height*emu_width;
+		for(int x = 0; x < emu_height; ++x)
+		{
+			p -= emu_width;
+			for(int y = 0; y < emu_width; ++y)
+				buffer2[x*gfx_desc.emu_aspect_y+y*gfx_desc.emu_aspect_x*GFX_MAX_FB_WIDTH] = p[y]; //FIXME: optimize
+		}
+		fb_update(&fb, buffer2, GFX_MAX_FB_WIDTH*sizeof(buffer2[0]));
+	}
+	else
+	{
+		//show something that may not be right
+		fb_update(&fb, rgba8_buffer, emu_width*sizeof(buffer2[0]));
+	}
+}
+
+SOKOL_APP_API_DECL double sapp_frame_duration(void)
+{
+ //measure and return averaged time
+ return 1./60;
+}
+
+
+void _sapp_init_event(sapp_event_type type) {
+    _sapp_clear(&_sapp.event, sizeof(_sapp.event));
+    _sapp.event.type = type;
+    _sapp.event.frame_count = _sapp.frame_count;
+    _sapp.event.mouse_button = SAPP_MOUSEBUTTON_INVALID;
+    _sapp.event.window_width = _sapp.window_width;
+    _sapp.event.window_height = _sapp.window_height;
+    _sapp.event.framebuffer_width = _sapp.framebuffer_width;
+    _sapp.event.framebuffer_height = _sapp.framebuffer_height;
+    /*
+    _sapp.event.mouse_x = _sapp.mouse.x;
+    _sapp.event.mouse_y = _sapp.mouse.y;
+    _sapp.event.mouse_dx = _sapp.mouse.dx;
+    _sapp.event.mouse_dy = _sapp.mouse.dy;
+    */
+}
+
+bool _sapp_call_event(const sapp_event* e) {
+    if (!_sapp.cleanup_called) {
+        if (_sapp.desc.event_cb) {
+            _sapp.desc.event_cb(e);
+        }
+        else if (_sapp.desc.event_userdata_cb) {
+            _sapp.desc.event_userdata_cb(e, _sapp.desc.user_data);
+        }
+    }
+    if (_sapp.event_consumed) {
+        _sapp.event_consumed = false;
+        return true;
+    }
+    else {
+        return false;
+    }
+}
+
+int sdl2keymap(int k)
+{
+  switch(k)
+  {
+    case SDLK_1: return SAPP_KEYCODE_1;
+    case SDLK_2: return SAPP_KEYCODE_2;
+    case SDLK_LEFT: return SAPP_KEYCODE_LEFT;
+    case SDLK_RIGHT: return SAPP_KEYCODE_RIGHT;
+    case SDLK_UP: return SAPP_KEYCODE_UP;
+    case SDLK_DOWN: return SAPP_KEYCODE_DOWN;
+  }
+  return 0;
+}
 void _sapp_linux_run(const sapp_desc* desc) {
     /* The following lines are here to trigger a linker error instead of an
         obscure runtime error if the user has forgotten to add -pthread to
@@ -976,7 +1084,7 @@ void _sapp_linux_run(const sapp_desc* desc) {
         while (count--) {
             XEvent event;
             XNextEvent(_sapp.x11.display, &event);
-            _sapp_x11_process_event(&event);
+            (&event);
         }
         _sapp_frame();
         _sapp_glx_swap_buffers();
@@ -998,76 +1106,39 @@ void _sapp_linux_run(const sapp_desc* desc) {
     XCloseDisplay(_sapp.x11.display);
     _sapp_discard_state();
     */
-    while(!fb_should_quit())
+    for(;;)
     {
-        _sapp_frame();
-        //_sapp_glx_swap_buffers()
-   		printf("frame %d\n", _sapp.frame_count);
+      SDL_Event event;
+      while(SDL_PollEvent(&event))
+      {
+        switch(event.type)
+        {
+          case SDL_QUIT:
+            return;
+          case SDL_KEYDOWN:
+          case SDL_KEYUP:
+            if(event.key.keysym.sym == SDLK_ESCAPE)
+              return;
+            {
+              //printf("Key event: %d\n", event.key.keysym.sym);
+              _sapp_init_event(event.type==SDL_KEYUP ? SAPP_EVENTTYPE_KEY_UP : SAPP_EVENTTYPE_KEY_DOWN);
+              _sapp.event.key_code = sdl2keymap(event.key.keysym.sym);
+              _sapp.event.key_repeat = 1;
+              _sapp.event.modifiers = 0;
+              _sapp_call_event(&_sapp.event);
+            }
+        }
+      }
+      _sapp_frame();
+      //_sapp_glx_swap_buffers()
+      //printf("frame %d\n", _sapp.frame_count);
     }
+
 }
 
-
-#include "gfx.h" //just prototypes and defines (since no COMMON_IMPL defined)
-
-fb_handle_t fb;
-uint32_t rgba8_buffer[GFX_MAX_FB_WIDTH * GFX_MAX_FB_HEIGHT];
-static uint32_t buffer2[GFX_MAX_FB_WIDTH * GFX_MAX_FB_HEIGHT];
-gfx_desc_t gfx_desc;
-
-void gfx_init(const gfx_desc_t* desc) {
-	gfx_desc = *desc;
-    //printf("border_top %d, border_bottom %d, border_left %d, border_right %d, rot90 %d\n", desc->border_top, desc->border_bottom, desc->border_left, desc->border_right, desc->rot90);
-    memset(buffer2, 0, sizeof(buffer2));
-	fb_init(_sapp.desc.width, _sapp.desc.height, true, &fb);
-	signal(SIGINT, SIG_DFL); //allows to exit by ctrl-c
-}
-
-//bool fb_should_quit(void);  
-
-void gfx_shutdown() {
-	fb_deinit(&fb);
-}
-
-uint32_t* gfx_framebuffer(void) {
-    return rgba8_buffer;
-}
-
-size_t gfx_framebuffer_size(void) {
-    return sizeof(rgba8_buffer);
-}
-
-uint64_t stm_now(void);
-
-void gfx_draw(int emu_width, int emu_height) {
-	//static int frame = 0;
-	//printf("draw emu window %dx%d, time %d, frame/60 %d\n", emu_width, emu_height, stm_now()/1000000000, ++frame/60);
-	if(gfx_desc.rot90*0)
-	{
-		const uint32_t *p = rgba8_buffer+emu_height*emu_width;
-		for(int x = 0; x < emu_height; ++x)
-		{
-			p -= emu_width;
-			for(int y = 0; y < emu_width; ++y)
-				buffer2[x*3+y*3*GFX_MAX_FB_WIDTH] = p[y];
-		}
-		fb_update(&fb, buffer2, GFX_MAX_FB_WIDTH*sizeof(buffer2[0]));
-	}
-	else
-	{
-		//show something that may not be right
-		fb_update(&fb, rgba8_buffer, emu_width*sizeof(buffer2[0]));
-	}
-}
-
-SOKOL_APP_API_DECL double sapp_frame_duration(void)
-{
- //measure and return averaged time
- return 1./60;
-}
 
 #define COMMON_IMPL
 #include "prof.h" //all portable
 #include "clock.h" //all portable
-
 
 #endif

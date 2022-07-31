@@ -9,9 +9,12 @@ INC += -I../../../chips
 INC += -I../roms
 INC += -I../../../sokol/tests/ext/
 INC += -I../../../fips-build/chips-test/linux-make-release/examples/common/
+INC += -I../../../fips-libmodplug/libmodplug/src
 
 CFLAGS += -O3 $(shell pkg-config sdl2 --cflags)
 LIBS = -ldl -lX11 -lXcursor -lXi -lGL -lpthread -lm -lasound $(shell pkg-config sdl2 --libs)
+LIBS += $(shell pkg-config libmodplug --libs) #for modplug
+
 LDFLAGS += $(LIBS)
 
 all: $(APP).bin
