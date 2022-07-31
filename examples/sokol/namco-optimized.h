@@ -42,6 +42,8 @@
     ## zlib/libpng license
 
     Copyright (c) 2019 Andre Weissflog
+    Copyright (c) 2022 Victor Suarez Rovere <suarezvictor@gmail.com>
+    
     This software is provided 'as-is', without any express or implied warranty.
     In no event will the authors be held liable for any damages arising from the
     use of this software.
@@ -955,7 +957,7 @@ static void _namco_sound_init(namco_t* sys, const namco_desc_t* desc) {
     snd->tick_counter = NAMCO_SOUND_PERIOD;
     snd->sample_period = (NAMCO_CPU_CLOCK * NAMCO_SAMPLE_SCALE) / _namco_def(desc->audio.sample_rate, 44100);
     snd->sample_counter = sys->sound.sample_period;
-#ifdef AUDIO_FLOAT
+#ifdef NAMCO_AUDIO_FLOAT
     snd->volume = _namco_def(desc->audio.volume, 1.0f);
 #else
     snd->volume = _namco_def((int)(desc->audio.volume*NAMCO_AUDIO_SAMPLE_SCALING), NAMCO_AUDIO_SAMPLE_SCALING);
