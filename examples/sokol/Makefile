@@ -1,4 +1,4 @@
-APP ?= pengo #OR: pacman bombjack
+APP ?= pacman #OR: pengo bombjack modplay-sapp
 
 #USE_SOKOL_DIRECT = -DUSE_SOKOL_DIRECT #this controls if using original sokol libs or not
 

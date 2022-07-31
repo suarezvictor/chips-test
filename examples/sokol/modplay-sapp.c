@@ -29,17 +29,12 @@ SOFTWARE.
 //  This uses the user-data callback model both for sokol_app.h and
 //  sokol_audio.h
 //------------------------------------------------------------------------------
-#if 0
-#include "sokol_app.h"
-#include "sokol_gfx.h"
-#include "sokol_audio.h"
-#include "sokol_glue.h"
-#else
 #include "common.h"
-#endif
 #include "modplug.h"
 #include "data/mods.h"
 #include <assert.h>
+
+//#define AUDIO_HIGH_QUALITY
 
 /* select between mono (1) and stereo (2) */
 #define MODPLAY_NUM_CHANNELS (2)
@@ -97,12 +92,6 @@ static void stream_cb(float* buffer, int num_frames, int num_channels, void* use
 
 void init(void* user_data) {
     state_t* state = (state_t*) user_data;
-#if 0
-    /* setup sokol_gfx */
-    sg_setup(&(sg_desc){
-        .context = sapp_sgcontext()
-    });
-#else
     gfx_init(&(gfx_desc_t) {
         .border_left = 0,
         .border_right = 0,
@@ -114,7 +103,6 @@ void init(void* user_data) {
     });
     clock_init();
     prof_init();
-#endif
     /* setup sokol_audio (default sample rate is 44100Hz) */
     saudio_setup(&(saudio_desc){
         .num_channels = MODPLAY_NUM_CHANNELS,
@@ -129,11 +117,16 @@ void init(void* user_data) {
     ModPlug_GetSettings(&mps);
     mps.mChannels = saudio_channels();
     mps.mBits = 32;
-    mps.mFrequency = saudio_sample_rate();
+    mps.mFrequency = saudio_sample_rate(); //ok at 44100 and 8000
+#ifdef AUDIO_HIGH_QUALITY
     mps.mResamplingMode = MODPLUG_RESAMPLE_LINEAR;
+    mps.mFlags = MODPLUG_ENABLE_OVERSAMPLING;
+#else
+    mps.mResamplingMode = MODPLUG_RESAMPLE_NEAREST; //fine enough
+    mps.mFlags = MODPLUG_ENABLE_OVERSAMPLING;
+#endif
     mps.mMaxMixChannels = 64;
     mps.mLoopCount = -1; /* loop play seems to be disabled in current libmodplug */
-    mps.mFlags = MODPLUG_ENABLE_OVERSAMPLING;
     ModPlug_SetSettings(&mps);
 
     state->mpf = ModPlug_Load(embed_disco_feva_baby_s3m, sizeof(embed_disco_feva_baby_s3m));
@@ -143,6 +136,7 @@ void init(void* user_data) {
 }
 
 static state_t state;   /* static structs are implicitely zero-initialized */
+static const int W = 400, H = 300; // window size
 
 void frame(void* user_data) {
     /* alternative way to get audio data into sokol_audio: push the
@@ -165,16 +159,7 @@ void frame(void* user_data) {
     #else
         (void)user_data;
     #endif
-#if 0    
-    sg_pass_action pass_action = {
-        .colors[0] = { .action = SG_ACTION_CLEAR, .value = { 0.4f, 0.7f, 1.0f, 1.0f } }
-    };
-    sg_begin_default_pass(&pass_action, sapp_width(), sapp_height());
-    sg_end_pass();
-    sg_commit();
-#else
-    gfx_draw(400, 300);
-#endif
+    gfx_draw(W, H);
 }
 
 void cleanup(void* user_data) {
@@ -197,9 +182,8 @@ sapp_desc sokol_main(int argc, char* argv[]) {
         .frame_userdata_cb = frame,
         .cleanup_userdata_cb = cleanup,
         .user_data = &state,
-        .width = 400,
-        .height = 300,
+        .width = W,
+        .height = H,
         .window_title = "Sokol Audio + LibModPlug",
-        .icon.sokol_default = true,
     };
 }
