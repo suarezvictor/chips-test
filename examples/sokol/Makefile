@@ -1,4 +1,4 @@
-APP ?= pacman #OR: pengo bombjack modplay-sapp
+APP?=pacman#OR: pengo bombjack modplay-sapp
 
 #USE_SOKOL_DIRECT = -DUSE_SOKOL_DIRECT #this controls if using original sokol libs or not
 
@@ -32,3 +32,11 @@ clean:
 	
 run: all
 	./$(APP).bin
+	
+
+main: $(APP)main.bin
+	./$(APP)main.bin
+	
+$(APP)main.bin: $(APP)-main.c
+	gcc $(CFLAGS) $(INC) $(APP)-main.c sdl_fb.c -o $(APP)main.bin $(LDFLAGS)
+
