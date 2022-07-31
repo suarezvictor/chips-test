@@ -36,18 +36,49 @@ SOFTWARE.
 #define ROTATED_90
 #define DEFAULT_SAMPLERATE 44100
 
+/////////////////////////
+//simulator declarations
+
+//#define NAMCO_PACMAN
+#define NAMCO_PENGO
+
+#define CHIPS_IMPL
+#include "chips/z80.h"
+#include "chips/clk.h"
+#include "chips/mem.h"
+#ifdef NAMCO_PACMAN
+#include "pacman-roms.h"
+#endif
+#ifdef NAMCO_PENGO
+#include "pengo-roms.h"
+#endif
+
+#include "systems/namco.h"
+
+
+/////////////////////////
+
 enum KEYCODE
 {
-  KEYCODE_NOKEY = 0,
-  KEYCODE_RIGHT,
-  KEYCODE_LEFT,
   KEYCODE_UP,
+  KEYCODE_LEFT,
+  KEYCODE_RIGHT,
   KEYCODE_DOWN,
   KEYCODE_1,
   KEYCODE_2,
+  KEYCODE_NOKEY = -1,
 };
 
-typedef void (*audio_cb_t)(const float* samples, int num_samples, void* user_data);
+#define NAMCO_INPUT_P1_UP       (1<<0)
+#define NAMCO_INPUT_P1_LEFT     (1<<1)
+#define NAMCO_INPUT_P1_RIGHT    (1<<2)
+#define NAMCO_INPUT_P1_DOWN     (1<<3)
+#define NAMCO_INPUT_P1_BUTTON   (1<<4)
+#define NAMCO_INPUT_P1_COIN     (1<<5)
+#define NAMCO_INPUT_P1_START    (1<<6)
+
+
+typedef void (*audio_cb_t)(const namco_sample_t* samples, int num_samples, void* user_data);
 void sim_init(uint32_t *framebuffer, size_t fb_size, audio_cb_t audio_cb, int samplerate);
 bool sim_exec(uint64_t t1);
 int sim_width(void);
@@ -56,10 +87,9 @@ void sim_setkey(enum KEYCODE key, bool value);
 
 #ifdef __linux__
 #include <signal.h>
-#include <pthread.h>
+#include <SDL2/SDL.h> //for events
 
 #include "sdl_fb.h"
-#include <SDL2/SDL.h> //for events
 
 
 static uint32_t pixel_buffer[FB_WIDTH_MAX*FRAME_HEIGHT];
@@ -129,7 +159,20 @@ bool run_sim(void)
   return sim_exec(t);
 }
 
-void push_audio(const float* samples, int num_samples, void* user_data) {}
+#ifdef NAMCO_AUDIO_FLOAT 
+static void push_audio(const float* samples, int num_samples, void* user_data) {
+    (void)user_data;
+    //saudio_push(samples, num_samples);
+}
+#else
+static void push_audio(const int32_t* samples, int num_samples, void* user_data) {
+    (void)user_data;
+    static float samples_f[NAMCO_MAX_AUDIO_SAMPLES];
+    for(int i = 0; i < num_samples; ++i)
+    	samples_f[i] = (float)samples[i]/NAMCO_AUDIO_SAMPLE_SCALING;
+    //saudio_push(samples_f, num_samples);
+}
+#endif
 
 int main(int argc, char* argv[])
 {
@@ -145,22 +188,6 @@ int main(int argc, char* argv[])
 
 /////////////////////
 //generic simulator
-
-//#define NAMCO_PACMAN
-#define NAMCO_PENGO
-
-#define CHIPS_IMPL
-#include "chips/z80.h"
-#include "chips/clk.h"
-#include "chips/mem.h"
-#ifdef NAMCO_PACMAN
-#include "pacman-roms.h"
-#endif
-#ifdef NAMCO_PENGO
-#include "pengo-roms.h"
-#endif
-
-#include "systems/namco.h"
 
 static namco_t sys;
 void sim_init(uint32_t *framebuffer, size_t fb_size, audio_cb_t audio_cb, int samplerate)
