@@ -114,7 +114,7 @@ void _saudio_clear(void* ptr, size_t size) {
 
 
 typedef struct {
-    SDL_AudioDeviceID* audio_device; //FIXME: rename to "device"
+    SDL_AudioDeviceID device;
     float* buffer;
     int buffer_byte_size;
     int buffer_frames;
@@ -149,25 +149,25 @@ bool _saudio_has_callback(void) {
 
 
 bool _saudio_backend_init(void) {
-	int samplerate = _SAUDIO_DEFAULT_SAMPLE_RATE;
-	int num_samples = _SAUDIO_DEFAULT_PACKET_FRAMES;
+	int samplerate = _saudio.sample_rate;
+	int num_samples = _saudio.packet_frames;
 	int num_channels = _saudio.num_channels;
 	
 	static SDL_AudioSpec specs = {0}, obtanined;
 	specs.freq = samplerate;
 	specs.channels = num_channels;
-	specs.samples = num_samples;
+	specs.samples = num_samples *sizeof(float);
 	specs.userdata = 0;
 	specs.callback = NULL; //no callback
 	specs.format = AUDIO_F32SYS; //float32
 
 	SDL_InitSubSystem(SDL_INIT_AUDIO);
-	_saudio.bytes_per_frame = sizeof(float);
-	_saudio.backend.audio_device = SDL_OpenAudioDevice(NULL, 0, &specs, &obtanined, SDL_AUDIO_ALLOW_CHANNELS_CHANGE|SDL_AUDIO_ALLOW_FREQUENCY_CHANGE);
-	if (!_saudio.backend.audio_device)
+	_saudio.bytes_per_frame = sizeof(float)*num_channels;
+	_saudio.backend.device = SDL_OpenAudioDevice(NULL, 0, &specs, &obtanined, SDL_AUDIO_ALLOW_CHANNELS_CHANGE|SDL_AUDIO_ALLOW_FREQUENCY_CHANGE);
+	if (!_saudio.backend.device)
 		return false;
 
-	SDL_PauseAudioDevice(_saudio.backend.audio_device, 0); //start playing
+	SDL_PauseAudioDevice(_saudio.backend.device, 0); //start playing
     printf("Audio ok, samplerate %d, num_samples %d, num_channels %d\n", samplerate, num_samples, num_channels);
     return true;
 };
@@ -224,6 +224,7 @@ SOKOL_API_IMPL int saudio_channels(void) {
 
 extern uint32_t rgba8_buffer[];
 
+//num_frames are doubled the samples if stereo
 SOKOL_API_IMPL int saudio_push(const float* frames, int num_frames) {
   //simple synth
   /*
@@ -232,23 +233,45 @@ SOKOL_API_IMPL int saudio_push(const float* frames, int num_frames) {
     static float wt = 0;
     wt += 2*3.14*1000/44100;
     ((float*)frames)[i] += .25*sin(wt); //adds a signal	
-  }
-  */
+  }*/
+  
   
   //memcpy(rgba8_buffer+0x1000, frames,  num_frames*sizeof(*frames)); //hacky screen dump. CAUTION: may overwrite memory
-  if(frames[num_frames/2] != 0)
-    printf("pushing %d samples half buffer sample=%f, bytes_per_frame %d\n", num_frames, frames[num_frames/2], _saudio.bytes_per_frame);
+  //if(frames[num_frames/2] != 0)
+    //printf("pushing %d samples half buffer sample=%f, bytes_per_frame %d\n", num_frames, frames[num_frames/2], _saudio.bytes_per_frame);
 
     SOKOL_ASSERT(frames && (num_frames > 0));
     if (_saudio.valid) {
         const int num_bytes = num_frames * _saudio.bytes_per_frame;
-		if(SDL_QueueAudio(_saudio.backend.audio_device, frames, num_bytes) == 0)
+		if(SDL_QueueAudio(_saudio.backend.device, frames, num_bytes) == 0)
 	        return num_frames;
     }
 	return 0;
 }
 
+//returns how much is in the buffer
+SOKOL_AUDIO_API_DECL int saudio_expect(void)
+{
+/*
+//push algorithm
+        const int num_frames = saudio_expect();
+        if (num_frames > 0) {
+            const int num_samples = num_frames * saudio_channels();
+            read_samples(state, state->flt_buf, num_samples);
+            saudio_push(state->flt_buf, num_frames);
+        }
+*/
 
+  int queued = SDL_GetQueuedAudioSize(_saudio.backend.device)/_saudio.bytes_per_frame;
+  int frames = _saudio.packet_frames;
+  if(queued)
+  {
+    //printf("fames %d, queued %d\n", frames, queued);
+  }
+  if(queued >= _saudio.buffer_frames)
+    return 0;
+  return frames; //always fixed packet size expected
+}
 
 ////////////////////////////////
 //from sokol_time.h

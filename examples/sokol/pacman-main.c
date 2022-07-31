@@ -22,73 +22,32 @@ FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
 AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
+SOFTWARE.    
 */
-
-#ifdef __linux__
-//#define NAMCO_AUDIO_FLOAT
 #include <stdint.h>
 #include <stdbool.h>
 #include <stdio.h>
-#define FB_WIDTH 800
-#define FB_HEIGHT 600
-#define FAST_CODE
-#define FAST_DATA
-#else
-#include <stddef.h> //for NULL (FIXME: used in litesdk_timer.h)
-#include <litex.h> //FAST_CODE and FAST_DATA macros
-#include "lite_fb.h"
-#include "litesdk_timer.h"
-#define NAMCO_USE_BGRA8 //invers palette
-#endif
 
+
+#define FRAME_WIDTH 800
+#define FRAME_HEIGHT 600
 #define FB_WIDTH_MAX 1024 //next power of 2
 #define PIXEL_SCALING 2
 #define ROTATED_90
 #define DEFAULT_SAMPLERATE 44100
-/////////////////////////
-//simulator declarations
-
-#define NAMCO_PACMAN
-//#define NAMCO_PENGO
-
-#define CHIPS_IMPL
-#include "chips/z80.h"
-#include "chips/clk.h"
-#include "chips/mem.h"
-#ifdef NAMCO_PACMAN
-#include "pacman-roms.h"
-#endif
-#ifdef NAMCO_PENGO
-#include "pengo-roms.h"
-#endif
-
-#include "namco-optimized.h"
-
-
-/////////////////////////
 
 enum KEYCODE
 {
-  KEYCODE_UP,
-  KEYCODE_LEFT,
+  KEYCODE_NOKEY = 0,
   KEYCODE_RIGHT,
+  KEYCODE_LEFT,
+  KEYCODE_UP,
   KEYCODE_DOWN,
   KEYCODE_1,
   KEYCODE_2,
-  KEYCODE_NOKEY = -1,
 };
 
-#define NAMCO_INPUT_P1_UP       (1<<0)
-#define NAMCO_INPUT_P1_LEFT     (1<<1)
-#define NAMCO_INPUT_P1_RIGHT    (1<<2)
-#define NAMCO_INPUT_P1_DOWN     (1<<3)
-#define NAMCO_INPUT_P1_BUTTON   (1<<4)
-#define NAMCO_INPUT_P1_COIN     (1<<5)
-#define NAMCO_INPUT_P1_START    (1<<6)
-
-
-typedef void (*audio_cb_t)(const namco_sample_t* samples, int num_samples, void* user_data);
+typedef void (*audio_cb_t)(const float* samples, int num_samples, void* user_data);
 void sim_init(uint32_t *framebuffer, size_t fb_size, audio_cb_t audio_cb, int samplerate);
 bool sim_exec(uint64_t t1);
 int sim_width(void);
@@ -102,17 +61,17 @@ void sim_setkey(enum KEYCODE key, bool value);
 #include "sdl_fb.h"
 
 
-static uint32_t pixel_buffer[FB_WIDTH_MAX*FB_HEIGHT];
+static uint32_t pixel_buffer[FB_WIDTH_MAX*FRAME_HEIGHT];
 static fb_handle_t fb;
 
 void draw_frame(int emu_width, int emu_height)
 {
 #ifdef ROTATED_90
-	static uint32_t rotated_buffer[FB_WIDTH_MAX*FB_HEIGHT];
+	static uint32_t rotated_buffer[FB_WIDTH_MAX*FRAME_HEIGHT];
 	const uint32_t *src = pixel_buffer+emu_height*emu_width;
 	uint32_t *dst = rotated_buffer;
-	dst += (FB_WIDTH-emu_height*PIXEL_SCALING)/2; //center X
-	dst += FB_WIDTH_MAX*(FB_HEIGHT-emu_width*PIXEL_SCALING)/2; //center Y
+	dst += (FRAME_WIDTH-emu_height*PIXEL_SCALING)/2; //center X
+	dst += FB_WIDTH_MAX*(FRAME_HEIGHT-emu_width*PIXEL_SCALING)/2; //center Y
 	src -= emu_width;
 	for(int x = 0; x < emu_height; ++x)
 	{
@@ -169,124 +128,40 @@ bool run_sim(void)
   return sim_exec(t);
 }
 
-static SDL_AudioDeviceID audio_device;
-void audio_init(int samplerate, int num_samples)
-{
-	static SDL_AudioSpec specs = {0}, obtanined;
-	specs.freq = samplerate;
-	specs.channels = 1;
-	specs.samples = num_samples;
-	specs.userdata = 0;
-	specs.callback = NULL; //no callback
-#ifdef NAMCO_AUDIO_FLOAT 
-	specs.format = AUDIO_F32SYS; //float32
-#else
-	specs.format = AUDIO_S32SYS; //int32
-#endif
-
-	SDL_InitSubSystem(SDL_INIT_AUDIO);
-	audio_device = SDL_OpenAudioDevice(NULL, 0, &specs, &obtanined, SDL_AUDIO_ALLOW_CHANNELS_CHANGE|SDL_AUDIO_ALLOW_FREQUENCY_CHANGE);
-	if (audio_device)
-	{
-			SDL_PauseAudioDevice(audio_device, 0); //start playing
-		    //printf("Audio ok, samplerate %d, num_samples %d\n", samplerate, num_samples);
-	}
-}
-
-void audio_pushbuf(const void* samples, size_t buffer_size)
-{
-	SDL_QueueAudio(audio_device, samples, buffer_size);
-}
-
-#ifdef NAMCO_AUDIO_FLOAT 
-static void push_audio(const float* samples, int num_samples, void* user_data) {
-    (void)user_data;
-    audio_pushbuf(samples, num_samples*sizeof(*samples));
-}
-#else
-static void push_audio(const int32_t* samples, int num_samples, void* user_data) {
-    (void)user_data;
-    static int32_t samples_conv[NAMCO_MAX_AUDIO_SAMPLES];
-    for(int i = 0; i < num_samples; ++i)
-    	samples_conv[i] = samples[i]*((1<<30)/NAMCO_AUDIO_SAMPLE_SCALING);
-#endif
-    audio_pushbuf(samples_conv, num_samples*sizeof(*samples));
-}
-#endif
+void push_audio(const float* samples, int num_samples, void* user_data) {}
 
 int main(int argc, char* argv[])
 {
-	fb_init(FB_WIDTH, FB_HEIGHT, true, &fb);
-	audio_init(DEFAULT_SAMPLERATE, NAMCO_DEFAULT_AUDIO_SAMPLES);
+	fb_init(FRAME_WIDTH, FRAME_HEIGHT, true, &fb);
 	signal(SIGINT, SIG_DFL); //allows to exit by ctrl-c
 	sim_init(pixel_buffer,  sizeof(pixel_buffer), push_audio, DEFAULT_SAMPLERATE);
     while(run_sim());
     return 0;
 }
 
-#else //not __linux__
 
-
-static uint32_t pixel_buffer[NAMCO_DISPLAY_WIDTH*NAMCO_DISPLAY_HEIGHT];
-
-void FAST_CODE draw_frame(int emu_width, int emu_height)
-{
-#ifdef ROTATED_90
-	const uint32_t *src = pixel_buffer+NAMCO_DISPLAY_HEIGHT*NAMCO_DISPLAY_WIDTH;
-	uint32_t *dst = (uint32_t*) FB_PAGE1;
-	dst += FB_WIDTH/2-emu_height*PIXEL_SCALING/2; //center X
-	dst += FB_WIDTH*(FB_HEIGHT/2-NAMCO_DISPLAY_WIDTH*PIXEL_SCALING/2); //center Y
-	src -= NAMCO_DISPLAY_WIDTH;
-	for(int x = 0; x < NAMCO_DISPLAY_HEIGHT; ++x)
-	{
-		for(int y = 0; y < NAMCO_DISPLAY_WIDTH; ++y)
-		{
-			*dst = *src;
-			src += 1;
-			dst += PIXEL_SCALING*FB_WIDTH;
-		}
-		src -= 2*NAMCO_DISPLAY_WIDTH;
-		dst += PIXEL_SCALING - NAMCO_DISPLAY_WIDTH*PIXEL_SCALING*FB_WIDTH;
-	}
-#else
-	#error no rotation
 #endif
-}
-static inline uint64_t cpu_hal_get_cycle_count64(void) { timer0_uptime_latch_write(1); return timer0_uptime_cycles_read(); }
-#define micros() ((1000000ull*cpu_hal_get_cycle_count64())/LITETIMER_BASE_FREQUENCY)
-
-bool run_sim(void)
-{
-  draw_frame(sim_width(), sim_height());
-  uint64_t t = micros();
-  printf("current time %llu\n", t);
-  return sim_exec(t);
-}
-
-#ifdef NAMCO_AUDIO_FLOAT
-#error floating point valued samples not supported
-#else
-static void push_audio(const int32_t* samples, int num_samples, void* user_data) {
-    (void)user_data;
-    //saudio_push(samples_f, num_samples);
-}
-#endif
-
-void emu_main(void)
-{
-	fb_clear();
-	sim_init(pixel_buffer, sizeof(pixel_buffer), push_audio, DEFAULT_SAMPLERATE);
-    while(run_sim());
-}
-
-
-#endif //__linux__
-
 
 /////////////////////
 //generic simulator
 
-static /*FAST_DATA*/ namco_t sys;
+//#define NAMCO_PACMAN
+#define NAMCO_PENGO
+
+#define CHIPS_IMPL
+#include "chips/z80.h"
+#include "chips/clk.h"
+#include "chips/mem.h"
+#ifdef NAMCO_PACMAN
+#include "pacman-roms.h"
+#endif
+#ifdef NAMCO_PENGO
+#include "pengo-roms.h"
+#endif
+
+#include "systems/namco.h"
+
+static namco_t sys;
 void sim_init(uint32_t *framebuffer, size_t fb_size, audio_cb_t audio_cb, int samplerate)
 {
     namco_init(&sys, &(namco_desc_t){
@@ -347,8 +222,6 @@ bool sim_exec(uint64_t t1)
 	
     int64_t us = (int64_t)(t1-t0);
     t0 = t1;
-    if(us > 1000000/60)
-      us = 1000000/60;
     namco_exec(&sys, us);
     return true;
 }

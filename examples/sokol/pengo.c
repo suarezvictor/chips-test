@@ -43,9 +43,16 @@ static struct {
 #define BORDER_RIGHT (8)
 #define BORDER_BOTTOM (16)
 
-static void push_audio(const float* samples, int num_samples, void* user_data) {
+static void push_audio(const namco_sample_t* samples, int num_samples, void* user_data) {
     (void)user_data;
+#ifdef NAMCO_AUDIO_FLOAT 
     saudio_push(samples, num_samples);
+#else
+    static float samples_f[NAMCO_MAX_AUDIO_SAMPLES];
+    for(int i = 0; i < num_samples; ++i)
+    	samples_f[i] = (float)samples[i]/NAMCO_AUDIO_SAMPLE_SCALING;
+    saudio_push(samples_f, num_samples);
+#endif
 }
 
 #if defined(CHIPS_USE_UI)

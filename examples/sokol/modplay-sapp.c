@@ -39,7 +39,7 @@ SOFTWARE.
 /* select between mono (1) and stereo (2) */
 #define MODPLAY_NUM_CHANNELS (2)
 /* use stream callback (0) or push-from-mainthread (1) model */
-#define MODPLAY_USE_PUSH (0)
+#define MODPLAY_USE_PUSH (1)
 /* big enough for packet_size * num_packets * num_channels */
 #define MODPLAY_SRCBUF_SAMPLES (16*1024)
 
@@ -109,6 +109,9 @@ void init(void* user_data) {
         #if !MODPLAY_USE_PUSH
         .stream_userdata_cb = stream_cb,
         .user_data = state
+        #else
+    .buffer_frames = MODPLAY_SRCBUF_SAMPLES,
+    .packet_frames = 1024
         #endif
     });
 

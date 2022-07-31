@@ -10,7 +10,7 @@
 #include "chips/mem.h"
 #include "pacman-roms.h"
 #define NAMCO_PACMAN
-#include "systems/namco.h"
+#include "namco-optimized.h"
 #if defined(CHIPS_USE_UI)
     #define UI_DBG_USE_Z80
     #include "ui.h"
