@@ -24,16 +24,17 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.    
 */
+#include <stdint.h>
+#include <stdbool.h>
+#include <stdio.h>
 
-#define CHIPS_IMPL
-#include "chips/z80.h"
-#include "chips/clk.h"
-#include "chips/mem.h"
-#include "pacman-roms.h"
-#define NAMCO_PACMAN
-#include "systems/namco.h"
 
-typedef void (*audio_cb_t)(const float* samples, int num_samples, void* user_data);
+#define FRAME_WIDTH 800
+#define FRAME_HEIGHT 600
+#define FB_WIDTH_MAX 1024 //next power of 2
+#define PIXEL_SCALING 2
+#define ROTATED_90
+#define DEFAULT_SAMPLERATE 44100
 
 enum KEYCODE
 {
@@ -46,86 +47,20 @@ enum KEYCODE
   KEYCODE_2,
 };
 
-/////////////////////
-//generic simulator
-
-static namco_t sys;
-void sim_init(uint32_t *framebuffer, size_t fb_size, audio_cb_t audio_cb, int samplerate)
-{
-    namco_init(&sys, &(namco_desc_t){
-        .pixel_buffer = { .ptr = framebuffer, .size = fb_size },
-        .audio = {
-            .callback = { .func = audio_cb },
-            .sample_rate = samplerate,
-        },
-        .roms = {
-            .common = {
-                .cpu_0000_0FFF = { .ptr=dump_pacman_6e, .size = sizeof(dump_pacman_6e) },
-                .cpu_1000_1FFF = { .ptr=dump_pacman_6f, .size = sizeof(dump_pacman_6f) },
-                .cpu_2000_2FFF = { .ptr=dump_pacman_6h, .size = sizeof(dump_pacman_6h) },
-                .cpu_3000_3FFF = { .ptr=dump_pacman_6j, .size = sizeof(dump_pacman_6j) },
-                .prom_0000_001F = { .ptr=dump_82s123_7f, .size = sizeof(dump_82s123_7f) },
-                .sound_0000_00FF = { .ptr=dump_82s126_1m, .size = sizeof(dump_82s126_1m) },
-                .sound_0100_01FF = { .ptr=dump_82s126_3m, .size = sizeof(dump_82s126_3m) },
-            },
-            .pacman = {
-                .gfx_0000_0FFF = { .ptr=dump_pacman_5e, .size = sizeof(dump_pacman_5e) },
-                .gfx_1000_1FFF = { .ptr=dump_pacman_5f, .size = sizeof(dump_pacman_5f) },
-                .prom_0020_011F = { .ptr=dump_82s126_4a, .size = sizeof(dump_82s126_4a) },
-            }
-        },
-    });
-}
-
-bool sim_exec(uint64_t t1)
-{
-	static uint64_t t0 = -1;
-	if(t0 == (uint64_t)-1)
-	{
-	  t0 = t1;
-	  return true; //no simulation 
-	}
-	
-    int64_t us = (int64_t)(t1-t0);
-    t0 = t1;
-    namco_exec(&sys, us);
-    return true;
-}
-
-int sim_width() { return namco_display_width(&sys); }
-int sim_height() { return namco_display_height(&sys); }
-
-void sim_setkey(enum KEYCODE key, bool value)
-{
-    switch (key) {
-		case KEYCODE_RIGHT:	(value ? namco_input_set : namco_input_clear) (&sys, NAMCO_INPUT_P1_RIGHT); break;
-		case KEYCODE_LEFT:	(value ? namco_input_set : namco_input_clear) (&sys, NAMCO_INPUT_P1_LEFT); break;
-		case KEYCODE_UP:	(value ? namco_input_set : namco_input_clear) (&sys, NAMCO_INPUT_P1_UP); break;
-		case KEYCODE_DOWN:	(value ? namco_input_set : namco_input_clear) (&sys, NAMCO_INPUT_P1_DOWN); break;
-		case KEYCODE_1:		(value ? namco_input_set : namco_input_clear) (&sys, NAMCO_INPUT_P1_COIN); break;
-		case KEYCODE_2:		(value ? namco_input_set : namco_input_clear) (&sys, NAMCO_INPUT_P2_COIN); break;
-		default:			(value ? namco_input_set : namco_input_clear) (&sys, NAMCO_INPUT_P1_START); break;
-    }
-}
-
-///////////////////////////
+typedef void (*audio_cb_t)(const float* samples, int num_samples, void* user_data);
+void sim_init(uint32_t *framebuffer, size_t fb_size, audio_cb_t audio_cb, int samplerate);
+bool sim_exec(uint64_t t1);
+int sim_width(void);
+int sim_height(void);
+void sim_setkey(enum KEYCODE key, bool value);
 
 #ifdef __linux__
-#include <stdint.h>
-#include <stdbool.h>
-#include <stdio.h>
 #include <signal.h>
 #include <pthread.h>
 
 #include "sdl_fb.h"
 #include <SDL2/SDL.h> //for events
 
-#define FRAME_WIDTH 800
-#define FRAME_HEIGHT 600
-#define FB_WIDTH_MAX 1024 //next power of 2
-#define PIXEL_SCALING 2
-#define ROTATED_90
-#define DEFAULT_SAMPLERATE 44100
 
 static uint32_t pixel_buffer[FB_WIDTH_MAX*FRAME_HEIGHT];
 static fb_handle_t fb;
@@ -207,4 +142,106 @@ int main(int argc, char* argv[])
 
 
 #endif
+
+/////////////////////
+//generic simulator
+
+//#define NAMCO_PACMAN
+#define NAMCO_PENGO
+
+#define CHIPS_IMPL
+#include "chips/z80.h"
+#include "chips/clk.h"
+#include "chips/mem.h"
+#ifdef NAMCO_PACMAN
+#include "pacman-roms.h"
+#endif
+#ifdef NAMCO_PENGO
+#include "pengo-roms.h"
+#endif
+
+#include "systems/namco.h"
+
+static namco_t sys;
+void sim_init(uint32_t *framebuffer, size_t fb_size, audio_cb_t audio_cb, int samplerate)
+{
+    namco_init(&sys, &(namco_desc_t){
+        .pixel_buffer = { .ptr = framebuffer, .size = fb_size },
+        .audio = {
+            .callback = { .func = audio_cb },
+            .sample_rate = samplerate,
+        },
+        .roms = {
+#ifdef NAMCO_PACMAN
+            .common = {
+                .cpu_0000_0FFF = { .ptr=dump_pacman_6e, .size = sizeof(dump_pacman_6e) },
+                .cpu_1000_1FFF = { .ptr=dump_pacman_6f, .size = sizeof(dump_pacman_6f) },
+                .cpu_2000_2FFF = { .ptr=dump_pacman_6h, .size = sizeof(dump_pacman_6h) },
+                .cpu_3000_3FFF = { .ptr=dump_pacman_6j, .size = sizeof(dump_pacman_6j) },
+                .prom_0000_001F = { .ptr=dump_82s123_7f, .size = sizeof(dump_82s123_7f) },
+                .sound_0000_00FF = { .ptr=dump_82s126_1m, .size = sizeof(dump_82s126_1m) },
+                .sound_0100_01FF = { .ptr=dump_82s126_3m, .size = sizeof(dump_82s126_3m) },
+            },
+            .pacman = {
+                .gfx_0000_0FFF = { .ptr=dump_pacman_5e, .size = sizeof(dump_pacman_5e) },
+                .gfx_1000_1FFF = { .ptr=dump_pacman_5f, .size = sizeof(dump_pacman_5f) },
+                .prom_0020_011F = { .ptr=dump_82s126_4a, .size = sizeof(dump_82s126_4a) },
+            }
+#endif
+#ifdef NAMCO_PENGO
+            .common = {
+                .cpu_0000_0FFF = { .ptr=dump_ep5120_8, .size=sizeof(dump_ep5120_8) },
+                .cpu_1000_1FFF = { .ptr=dump_ep5121_7, .size=sizeof(dump_ep5121_7) },
+                .cpu_2000_2FFF = { .ptr=dump_ep5122_15, .size=sizeof(dump_ep5122_15) },
+                .cpu_3000_3FFF = { .ptr=dump_ep5123_14, .size=sizeof(dump_ep5123_14) },
+                .prom_0000_001F = { .ptr=dump_pr1633_78, .size=sizeof(dump_pr1633_78) },
+                .sound_0000_00FF = { .ptr=dump_pr1635_51, .size=sizeof(dump_pr1635_51) },
+                .sound_0100_01FF = { .ptr=dump_pr1636_70, .size=sizeof(dump_pr1636_70) }
+            },
+            .pengo = {
+                .cpu_4000_4FFF = { .ptr=dump_ep5124_21, .size=sizeof(dump_ep5124_21) },
+                .cpu_5000_5FFF = { .ptr=dump_ep5125_20, .size=sizeof(dump_ep5125_20) },
+                .cpu_6000_6FFF = { .ptr=dump_ep5126_32, .size=sizeof(dump_ep5126_32) },
+                .cpu_7000_7FFF = { .ptr=dump_ep5127_31, .size=sizeof(dump_ep5127_31) },
+                .gfx_0000_1FFF = { .ptr=dump_ep1640_92, .size=sizeof(dump_ep1640_92) },
+                .gfx_2000_3FFF = { .ptr=dump_ep1695_105, .size=sizeof(dump_ep1695_105) },
+                .prom_0020_041F = { .ptr=dump_pr1634_88, .size=sizeof(dump_pr1634_88) }
+            }
+#endif
+        },
+    });
+}
+
+bool sim_exec(uint64_t t1)
+{
+	static uint64_t t0 = -1;
+	if(t0 == (uint64_t)-1)
+	{
+	  t0 = t1;
+	  return true; //no simulation 
+	}
+	
+    int64_t us = (int64_t)(t1-t0);
+    t0 = t1;
+    namco_exec(&sys, us);
+    return true;
+}
+
+int sim_width(void) { return namco_display_width(&sys); }
+int sim_height(void) { return namco_display_height(&sys); }
+
+void sim_setkey(enum KEYCODE key, bool value)
+{
+    switch (key) {
+		case KEYCODE_RIGHT:	(value ? namco_input_set : namco_input_clear) (&sys, NAMCO_INPUT_P1_RIGHT); break;
+		case KEYCODE_LEFT:	(value ? namco_input_set : namco_input_clear) (&sys, NAMCO_INPUT_P1_LEFT); break;
+		case KEYCODE_UP:	(value ? namco_input_set : namco_input_clear) (&sys, NAMCO_INPUT_P1_UP); break;
+		case KEYCODE_DOWN:	(value ? namco_input_set : namco_input_clear) (&sys, NAMCO_INPUT_P1_DOWN); break;
+		case KEYCODE_1:		(value ? namco_input_set : namco_input_clear) (&sys, NAMCO_INPUT_P1_COIN); break;
+		case KEYCODE_2:		(value ? namco_input_set : namco_input_clear) (&sys, NAMCO_INPUT_P2_COIN); break;
+		default:			(value ? namco_input_set : namco_input_clear) (&sys, NAMCO_INPUT_P1_START); break;
+    }
+}
+
+///////////////////////////
 
