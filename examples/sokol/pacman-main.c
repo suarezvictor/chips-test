@@ -33,12 +33,7 @@ SOFTWARE.
 #define NAMCO_PACMAN
 #include "systems/namco.h"
 
-//callbacks
-void push_audio(const float* samples, int num_samples, void* user_data);
-int saudio_sample_rate(void);
-
-uint32_t *gfx_framebuffer(void);
-size_t gfx_framebuffer_size(void);
+typedef void (*audio_cb_t)(const float* samples, int num_samples, void* user_data);
 
 enum KEYCODE
 {
@@ -55,12 +50,13 @@ enum KEYCODE
 //generic simulator
 
 static namco_t sys;
-void sim_init(void) { //FIXME: pass some parameters
+void sim_init(uint32_t *framebuffer, size_t fb_size, audio_cb_t audio_cb, int samplerate)
+{
     namco_init(&sys, &(namco_desc_t){
-        .pixel_buffer = { .ptr = gfx_framebuffer(), .size = gfx_framebuffer_size() },
+        .pixel_buffer = { .ptr = framebuffer, .size = fb_size },
         .audio = {
-            .callback = { .func = push_audio },
-            .sample_rate = saudio_sample_rate(),
+            .callback = { .func = audio_cb },
+            .sample_rate = samplerate,
         },
         .roms = {
             .common = {
@@ -124,31 +120,39 @@ void sim_setkey(enum KEYCODE key, bool value)
 #include "sdl_fb.h"
 #include <SDL2/SDL.h> //for events
 
-#define FB_WIDTH 1024
-static uint32_t pixel_buffer[FB_WIDTH*FB_WIDTH];
-fb_handle_t fb;
-
+#define FRAME_WIDTH 800
+#define FRAME_HEIGHT 600
+#define FB_WIDTH_MAX 1024 //next power of 2
 #define PIXEL_SCALING 2
+#define ROTATED_90
+#define DEFAULT_SAMPLERATE 44100
+
+static uint32_t pixel_buffer[FB_WIDTH_MAX*FRAME_HEIGHT];
+static fb_handle_t fb;
+
 void draw_frame(int emu_width, int emu_height)
 {
-#if 1
+#ifdef ROTATED_90
+	static uint32_t rotated_buffer[FB_WIDTH_MAX*FRAME_HEIGHT];
+	const uint32_t *src = pixel_buffer+emu_height*emu_width;
+	uint32_t *dst = rotated_buffer;
+	dst += (FRAME_WIDTH-emu_height*PIXEL_SCALING)/2; //center X
+	dst += FB_WIDTH_MAX*(FRAME_HEIGHT-emu_width*PIXEL_SCALING)/2; //center Y
+	src -= emu_width;
+	for(int x = 0; x < emu_height; ++x)
 	{
-		static uint32_t rotated_buffer[FB_WIDTH*FB_WIDTH];
-		const uint32_t *src = pixel_buffer+emu_height*emu_width;
-		uint32_t *dst = rotated_buffer;
-		for(int x = 0; x < emu_height; ++x)
+		for(int y = 0; y < emu_width; ++y)
 		{
-			src -= emu_width;
-			for(int y = 0; y < emu_width; ++y)
-				dst[x*PIXEL_SCALING+y*PIXEL_SCALING*FB_WIDTH] = src[y]; //FIXME: optimize
+			*dst = *src;
+			src += 1;
+			dst += PIXEL_SCALING*FB_WIDTH_MAX;
 		}
-		fb_update(&fb, rotated_buffer, FB_WIDTH*sizeof(rotated_buffer[0]));
+		src -= 2*emu_width;
+		dst += PIXEL_SCALING - emu_width*PIXEL_SCALING*FB_WIDTH_MAX;
 	}
+	fb_update(&fb, rotated_buffer, FB_WIDTH_MAX*sizeof(rotated_buffer[0]));
 #else
-	{
-		//show something that may not be right
-		fb_update(&fb, pixel_buffer, emu_width*sizeof(pixel_buffer[0]));
-	}
+	fb_update(&fb, pixel_buffer, emu_width*sizeof(pixel_buffer[0]));
 #endif
 }
 
@@ -185,26 +189,22 @@ bool run_sim(void)
         }
     }
     
-  int w = sim_width(), h = sim_height();
-  draw_frame(w, h);
+  draw_frame(sim_width(), sim_height());
   uint64_t t = higres_ticks() * 1000000ull / higres_ticks_freq();
   return sim_exec(t);
 }
 
+void push_audio(const float* samples, int num_samples, void* user_data) {}
+
 int main(int argc, char* argv[])
 {
-	fb_init(800, 600, true, &fb);
+	fb_init(FRAME_WIDTH, FRAME_HEIGHT, true, &fb);
 	signal(SIGINT, SIG_DFL); //allows to exit by ctrl-c
-	sim_init();
+	sim_init(pixel_buffer,  sizeof(pixel_buffer), push_audio, DEFAULT_SAMPLERATE);
     while(run_sim());
     return 0;
 }
 
-//callbacks
-int saudio_sample_rate(void) { return 44100; }
-uint32_t* gfx_framebuffer(void) { return pixel_buffer; }
-size_t gfx_framebuffer_size(void) { return sizeof(pixel_buffer); }
-void push_audio(const float* samples, int num_samples, void* user_data) {}
 
 #endif
 
