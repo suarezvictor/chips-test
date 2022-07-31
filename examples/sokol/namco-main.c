@@ -26,6 +26,7 @@ SOFTWARE.
 */
 
 #ifdef __linux__
+//#define NAMCO_AUDIO_FLOAT
 #include <stdint.h>
 #include <stdbool.h>
 #include <stdio.h>
@@ -45,7 +46,6 @@ SOFTWARE.
 #define PIXEL_SCALING 2
 #define ROTATED_90
 #define DEFAULT_SAMPLERATE 44100
-#define NAMCO_AUDIO_FLOAT
 /////////////////////////
 //simulator declarations
 
@@ -179,9 +179,9 @@ void audio_init(int samplerate, int num_samples)
 	specs.userdata = 0;
 	specs.callback = NULL; //no callback
 #ifdef NAMCO_AUDIO_FLOAT 
-	specs.format = AUDIO_F32SYS;
+	specs.format = AUDIO_F32SYS; //float32
 #else
-#error only float sample supported
+	specs.format = AUDIO_S32SYS; //int32
 #endif
 
 	SDL_InitSubSystem(SDL_INIT_AUDIO);
@@ -193,29 +193,51 @@ void audio_init(int samplerate, int num_samples)
 	}
 }
 
-void audio_pushf(const float* samples, int num_samples)
+void audio_pushbuf(const void* samples, size_t buffer_size)
 {
-    float value = samples[num_samples/2];
-    //if(value)
-    //  printf("Received float audio frame: %d samples, value at half buffer %f\n", num_samples, value);
-	SDL_QueueAudio(audio_device, samples, num_samples*sizeof(*samples));
+	SDL_QueueAudio(audio_device, samples, buffer_size);
 }
 
 #ifdef NAMCO_AUDIO_FLOAT 
 static void push_audio(const float* samples, int num_samples, void* user_data) {
     (void)user_data;
-    audio_pushf(samples, num_samples);
+    audio_pushbuf(samples, num_samples*sizeof(*samples));
+/*
+//player 1 coin
+Received float audio frame: 128 samples, value at half buffer 0.156248
+Received float audio frame: 128 samples, value at half buffer 0.195311
+Received float audio frame: 128 samples, value at half buffer 0.078124
+Received float audio frame: 128 samples, value at half buffer -0.039062
+*/
 }
 #else
 static void push_audio(const int32_t* samples, int num_samples, void* user_data) {
     (void)user_data;
-    int32_t value = samples[num_samples/2];
-    //if(value)
-    //  printf("Received float audio frame: %d samples, mid value %d\n", num_samples, value);
+#if 0    
     static float samples_f[NAMCO_MAX_AUDIO_SAMPLES];
     for(int i = 0; i < num_samples; ++i)
-    	samples_f[i] = (float)samples[i]/NAMCO_AUDIO_SAMPLE_SCALING+0.5;
-    audio_pushf(samples_f, num_samples);
+    {
+    	samples_f[i] = ((float)samples[i])/(NAMCO_AUDIO_SAMPLE_SCALING*4); //FIXME: volume doesn't seem right
+    }
+#else
+    static int32_t samples_conv[NAMCO_MAX_AUDIO_SAMPLES];
+    for(int i = 0; i < num_samples; ++i)
+    	samples_conv[i] = samples[i]*((1<<30)/NAMCO_AUDIO_SAMPLE_SCALING);
+#endif
+/*
+    int32_t value = samples[num_samples/2];
+    if(value)
+      printf("Received float audio frame: %d samples, mid value %d, float 0x%08X\n", num_samples, value, samples_conv[num_samples/2]);
+*/
+    audio_pushbuf(samples_conv, num_samples*sizeof(*samples));
+
+/*
+//player 1 coin
+Received float audio frame: 128 samples, mid value 12800, float 0.195312
+Received float audio frame: 128 samples, mid value -2560, float -0.039062
+Received float audio frame: 128 samples, mid value -2560, float -0.039062
+Received float audio frame: 128 samples, mid value -12800, float -0.195312
+*/
 }
 #endif
 
