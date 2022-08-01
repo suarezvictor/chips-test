@@ -25,6 +25,12 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 */
 
+//select project
+#define NAMCO_PACMAN
+//#define NAMCO_PENGO
+//#define MOD_PLAYER
+
+
 #ifdef __linux__
 //#define NAMCO_AUDIO_FLOAT
 #include <stdint.h>
@@ -43,15 +49,11 @@ SOFTWARE.
 #endif
 
 #define FB_WIDTH_MAX 1024 //next power of 2
-#define PIXEL_SCALING 2
-#define ROTATED_90
 #define DEFAULT_SAMPLERATE 44100
 /////////////////////////
 //simulator declarations
 
-#define NAMCO_PACMAN
-//#define NAMCO_PENGO
-
+#if defined(NAMCO_PACMAN) || defined(NAMCO_PENGO)
 #define CHIPS_IMPL
 #include "chips/z80.h"
 #include "chips/clk.h"
@@ -62,9 +64,20 @@ SOFTWARE.
 #ifdef NAMCO_PENGO
 #include "pengo-roms.h"
 #endif
-
 #include "namco-optimized.h"
+#define PIXEL_SCALING 2
+#define ROTATED_90
+#define SAMPLE_CONVERT(s) ((s)*((1<<30)/NAMCO_AUDIO_SAMPLE_SCALING))
+#endif //not NAMCO_PACMAN nor NAMCO_PENGO
 
+#ifdef MOD_PLAYER
+#define PIXEL_SCALING 1
+//FIXME: rename those namco-specific names
+#define NAMCO_DEFAULT_AUDIO_SAMPLES (128*8)
+#define NAMCO_DEFAULT_BUFFER_SAMPLES (16*1024)
+#define NAMCO_MAX_AUDIO_SAMPLES NAMCO_DEFAULT_BUFFER_SAMPLES
+typedef int32_t namco_sample_t;
+#endif
 
 /////////////////////////
 
@@ -198,6 +211,20 @@ void audio_pushbuf(const void* samples, size_t buffer_size)
 	SDL_QueueAudio(audio_device, samples, buffer_size);
 }
 
+//returns how much is in the buffer
+#ifdef NAMCO_DEFAULT_BUFFER_SAMPLES
+int audio_fifo_space(void)
+{
+  int queued = SDL_GetQueuedAudioSize(audio_device)/sizeof(namco_sample_t); //1 ch
+  int frames = NAMCO_DEFAULT_AUDIO_SAMPLES;
+  if(queued >= NAMCO_DEFAULT_BUFFER_SAMPLES)
+    return 0;
+  return frames; //always fixed packet size expected
+}
+#endif
+
+int saudio_channels() { return 1; }
+
 #ifdef NAMCO_AUDIO_FLOAT 
 static void push_audio(const float* samples, int num_samples, void* user_data) {
     (void)user_data;
@@ -207,11 +234,15 @@ static void push_audio(const float* samples, int num_samples, void* user_data) {
 static void push_audio(const int32_t* samples, int num_samples, void* user_data) {
     (void)user_data;
     static int32_t samples_conv[NAMCO_MAX_AUDIO_SAMPLES];
+#ifdef SAMPLE_CONVERT
     for(int i = 0; i < num_samples; ++i)
-    	samples_conv[i] = samples[i]*((1<<30)/NAMCO_AUDIO_SAMPLE_SCALING);
-#endif
+    	samples_conv[i] = SAMPLE_CONVERT(samples[i]);
     audio_pushbuf(samples_conv, num_samples*sizeof(*samples));
+#else
+    audio_pushbuf(samples, num_samples*sizeof(*samples));
+#endif
 }
+#endif
 
 int main(int argc, char* argv[])
 {
@@ -282,6 +313,7 @@ void emu_main(void)
 #endif //__linux__
 
 
+#if defined(NAMCO_PACMAN) || defined(NAMCO_PENGO)
 /////////////////////
 //generic simulator
 
@@ -369,4 +401,136 @@ void sim_setkey(enum KEYCODE key, bool value)
 }
 
 ///////////////////////////
+#endif // NAMCO_PACMAN || NAMCO_PENGO
+
+#ifdef MOD_PLAYER
+/*
+MIT License
+
+Copyright (c) 2017 Andre Weissflog
+Copyright (c) 2022 Victor Suarez Rovere <suarezvictor@gmail.com>
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+*/
+
+#include "modplug.h"
+#include "data/mods.h"
+#include <assert.h>
+
+//#define AUDIO_HIGH_QUALITY
+
+/* select between mono (1) and stereo (2) */
+#define MODPLAY_NUM_CHANNELS (1)
+/* use stream callback (0) or push-from-mainthread (1) model */
+#define MODPLAY_USE_PUSH (1)
+/* big enough for packet_size * num_packets * num_channels */
+#define MODPLAY_SRCBUF_SAMPLES (16*1024)
+
+typedef struct {
+    bool mpf_valid;
+    ModPlugFile* mpf;
+#ifdef NAMCO_AUDIO_FLOAT
+    int src_buf[MODPLAY_SRCBUF_SAMPLES]; //needed for conversion
+#endif
+    namco_sample_t dst_buf[MODPLAY_SRCBUF_SAMPLES];
+    audio_cb_t audio_cb;
+} state_t;
+
+static state_t state;
+
+static const int W = 400, H = 300; // window size
+
+void sim_init(uint32_t *framebuffer, size_t fb_size, audio_cb_t audio_cb, int samplerate)
+{
+    /* setup libmodplug and load mod from embedded C array */
+    ModPlug_Settings mps;
+    ModPlug_GetSettings(&mps);
+    mps.mChannels = MODPLAY_NUM_CHANNELS;
+    mps.mBits = 32;
+    mps.mFrequency = samplerate; //ok at 44100 and 8000
+#ifdef AUDIO_HIGH_QUALITY
+    mps.mResamplingMode = MODPLUG_RESAMPLE_LINEAR;
+    mps.mFlags = MODPLUG_ENABLE_OVERSAMPLING;
+#else
+    mps.mResamplingMode = MODPLUG_RESAMPLE_NEAREST; //fine enough
+    mps.mFlags = MODPLUG_ENABLE_OVERSAMPLING;
+#endif
+    mps.mMaxMixChannels = 64;
+    mps.mLoopCount = -1; /* loop play seems to be disabled in current libmodplug */
+    ModPlug_SetSettings(&mps);
+
+    state.mpf = ModPlug_Load(embed_disco_feva_baby_s3m, sizeof(embed_disco_feva_baby_s3m));
+    if (state.mpf) {
+        state.mpf_valid = true;
+    }
+    state.audio_cb = audio_cb;
+}
+
+
+/* common function to read sample stream from libmodplug and convert to float */
+static int read_samples(state_t* state, namco_sample_t* buffer, int num_samples) {
+    assert(num_samples <= MODPLAY_SRCBUF_SAMPLES);
+    if (!state->mpf_valid)
+        return 0;
+    /* NOTE: for multi-channel playback, the samples are interleaved
+       (e.g. left/right/left/right/...)
+    */
+#ifndef NAMCO_AUDIO_FLOAT
+    int res = ModPlug_Read(state->mpf, buffer, sizeof(namco_sample_t)*num_samples);
+    return res / (int)sizeof(int);
+#else
+    int res = ModPlug_Read(state->mpf, (void*)state->src_buf, sizeof(namco_sample_t)*num_samples);
+    int samples_in_buffer = res / (int)sizeof(int);
+    int i;
+    for (i = 0; i < samples_in_buffer; i++) {
+        buffer[i] = state->src_buf[i] / (float)0x7fffffff;
+    }
+    for (; i < num_samples; i++) {
+        buffer[i] = 0.0f;
+    }
+    return samples_in_buffer;
+#endif
+}
+
+bool sim_exec(uint64_t t1)
+{
+    //draw something
+	static uint8_t c = 0;
+    memset(pixel_buffer, c, 50*sizeof(*pixel_buffer));
+	c += 17;
+
+    const int num_frames = audio_fifo_space();
+    if (num_frames == 0)
+      return true; //already full
+
+  const int num_samples = num_frames * saudio_channels();
+  int r = read_samples(&state, state.dst_buf, num_samples);
+  if(r == 0)
+    return false;
+
+  state.audio_cb(state.dst_buf, r, NULL);
+  return true;
+}
+
+int sim_width(void) { return W; }
+int sim_height(void) { return H; }
+void sim_setkey(enum KEYCODE key, bool value) {}
+
+#endif // MOD_PLAYER
 
